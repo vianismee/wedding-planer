@@ -21,6 +21,10 @@ git reset --quiet --hard "origin/$BRANCH"
 echo "Commit: $(git log -1 --format='%h %s')"
 
 npm ci --no-audit --no-fund --loglevel=error
+# Env produksi dimuat saat build supaya Better Auth tidak memakai secret bawaan.
+set -a
+. "$ROOT/.env.production.local"
+set +a
 NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=1536 npm run build
 
 mkdir -p "$REL"
