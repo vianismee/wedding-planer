@@ -13,6 +13,7 @@ import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
 import { CopyLink } from "@/components/copy-link";
 import { RoleSelect } from "./role-select";
+import { InstallApp } from "@/components/install-app";
 import { DangerZone, WeddingSwitcher } from "./client";
 
 export const metadata: Metadata = { title: "Pengaturan" };
@@ -188,6 +189,14 @@ export default async function PengaturanPage() {
             <LinkButton href="/onboarding?baru=1" variant="ground" className="self-start">
               Buat ruang pernikahan lain
             </LinkButton>
+          </Card>
+
+          <Card className="flex flex-col gap-3">
+            <SectionTitle>Pasang di HP</SectionTitle>
+            <p className="text-[13px] text-muted">
+              Pasang Rukun di layar utama supaya bisa dibuka seperti aplikasi, tanpa bar alamat browser.
+            </p>
+            <InstallApp variant="card" />
           </Card>
 
           <Card className="flex flex-col gap-3">

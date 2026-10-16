@@ -17,11 +17,11 @@ function passwordError(code: string | undefined, status: number) {
   return "Gagal masuk. Periksa isian lalu coba lagi.";
 }
 
-export function LoginForm({ next, google }: { next: string; google: boolean }) {
+export function LoginForm({ next, google, initialRegister = false }: { next: string; google: boolean; initialRegister?: boolean }) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("kode");
+  const [mode, setMode] = useState<Mode>(initialRegister ? "sandi" : "kode");
   const [step, setStep] = useState<"email" | "otp">("email");
-  const [register, setRegister] = useState(false);
+  const [register, setRegister] = useState(initialRegister);
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");

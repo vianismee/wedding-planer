@@ -26,6 +26,7 @@ import { authClient } from "@/lib/auth-client";
 import { Button, cx } from "./kit";
 import { setCapsuleItems } from "@/actions/anggota";
 import { useConfirm } from "./confirm";
+import { InstallApp } from "./install-app";
 import { Modal } from "./forms";
 
 export type NavId =
@@ -175,6 +176,7 @@ export function Sidebar({
           </span>
           <span className="block truncate">Masuk sebagai {userName}</span>
         </p>
+        <InstallApp variant="sidebar" />
         {items.includes("pengaturan") && (
           <Link
             href="/pengaturan"
@@ -330,6 +332,7 @@ export function Capsule({
                 <LogOut size={18} aria-hidden="true" />
                 Keluar
               </button>
+              <InstallApp variant="sheet" />
             </nav>
             <button
               type="button"

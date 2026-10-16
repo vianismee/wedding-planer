@@ -159,3 +159,16 @@ select:focus-visible,
 .rise {
   animation: rise 200ms ease both;
 }
+
+/* iOS Safari memperbesar layar saat isian berhuruf di bawah 16px disentuh.
+   Khusus iOS (bukan desktop), semua isian dipaksa 16px supaya tidak nge-zoom,
+   tanpa mematikan pinch-zoom (maximum-scale) yang dibutuhkan untuk aksesibilitas.
+   Sengaja di luar @layer supaya mengalahkan utilitas text-[14px]. */
+@supports (-webkit-touch-callout: none) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea,
+  [cmdk-input] {
+    font-size: 16px !important;
+  }
+}

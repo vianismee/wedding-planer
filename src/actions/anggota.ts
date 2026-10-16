@@ -9,6 +9,7 @@ import { getContext, getSession, isMember, requireAction, WEDDING_COOKIE } from 
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
 import { ACCESS, can, MAX_MEMBERS, ROLE_LABEL, type Area, type Role } from "@/lib/roles";
 import { sendMail } from "@/lib/mailer";
+import { INVITE_COOKIE } from "@/lib/invites";
 import { track } from "@/lib/analytics";
 
 const inviteRole = z.enum(["pasangan", "keluarga", "panitia"], { message: "Pilih peran." });
@@ -104,7 +105,9 @@ export async function acceptInvite(token: string): Promise<ActionResult> {
       await db.insert(schema.member).values({ weddingId: inv.weddingId, userId: session.user.id, role: inv.role as Role });
     }
     await db.update(schema.invite).set({ acceptedAt: new Date() }).where(eq(schema.invite.id, inv.id));
-    (await cookies()).set(WEDDING_COOKIE, inv.weddingId, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
+    const jar = await cookies();
+    jar.set(WEDDING_COOKIE, inv.weddingId, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 365 });
+    jar.delete(INVITE_COOKIE);
     track("member_joined", { weddingId: inv.weddingId, role: inv.role });
     revalidatePath("/", "layout");
   });

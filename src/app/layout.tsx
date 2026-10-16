@@ -15,6 +15,14 @@ export const metadata: Metadata = {
   description: "Ruang kerja bersama untuk pasangan dan keluarga yang mengurus pernikahan sendiri.",
   applicationName: "Rukun",
   appleWebApp: { capable: true, title: "Rukun", statusBarStyle: "default" },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {

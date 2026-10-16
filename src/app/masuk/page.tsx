@@ -6,10 +6,11 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Masuk" };
 
-export default async function MasukPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
-  const { next } = await searchParams;
+export default async function MasukPage({ searchParams }: { searchParams: Promise<{ next?: string; mode?: string }> }) {
+  const { next, mode } = await searchParams;
   const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
   if (await getSession()) redirect(safeNext);
+  const fromInvite = safeNext.startsWith("/undangan/");
   return (
     <main className="flex min-h-dvh items-center justify-center p-4">
       <div className="flex w-full max-w-[440px] flex-col gap-6 rounded-[24px] bg-surface p-6 sm:p-8">
@@ -23,12 +24,12 @@ export default async function MasukPage({ searchParams }: { searchParams: Promis
           <span className="text-[22px] font-extrabold tracking-[-0.02em]">Rukun</span>
         </div>
         <div className="flex flex-col gap-1">
-          <h1 className="text-[28px] font-extrabold leading-[1.2] tracking-[-0.02em]">Masuk atau daftar</h1>
+          <h1 className="text-[28px] font-extrabold leading-[1.2] tracking-[-0.02em]">{fromInvite ? "Daftar untuk bergabung" : "Masuk atau daftar"}</h1>
           <p className="text-[14px] text-muted">
             Pakai kode dari email, atau daftar langsung dengan kata sandi.
           </p>
         </div>
-        <LoginForm next={safeNext} google={googleEnabled} />
+        <LoginForm next={safeNext} google={googleEnabled} initialRegister={mode === "daftar"} />
       </div>
     </main>
   );
