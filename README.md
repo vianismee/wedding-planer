@@ -54,3 +54,25 @@ docker compose up -d --build
 ```
 
 Migrasi database berjalan otomatis saat app start. Backup harian PostgreSQL dan MinIO ke luar VPS masih perlu dipasang terpisah (PRD: keamanan dan privasi).
+
+## Deploy ke VPS tanpa Docker (produksi saat ini)
+
+Dipakai di `nikah.vianismee.my.id`, berdampingan dengan situs lain di nginx yang sama.
+
+| Bagian | Lokasi |
+| --- | --- |
+| Kode | `/srv/rukun/repo` (clone repo ini) |
+| Rilis aktif | `/srv/rukun/current` (symlink ke `/srv/rukun/releases/<waktu>`, 3 rilis terakhir disimpan) |
+| Rahasia | `/srv/rukun/.env.production.local` (mode 600, tidak ada di repo) |
+| File upload | `/srv/rukun/data/uploads` (privat, hanya lewat `/api/files/[id]`) |
+| Database | PostgreSQL 16 lokal, database `rukun` |
+| Service | `rukun.service` di `127.0.0.1:3100`, `rukun-reminders.timer` setiap 08.00 WIB |
+| Proxy dan SSL | `/etc/nginx/sites-available/rukun`, sertifikat Let's Encrypt (perpanjang otomatis) |
+
+Rilis ulang setelah push ke `main`:
+
+```bash
+ssh ubuntu@<server> 'bash /srv/rukun/repo/scripts/deploy-vps.sh'
+```
+
+Migrasi database berjalan otomatis saat service start. Log: `journalctl -u rukun -f`.
