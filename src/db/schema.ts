@@ -454,6 +454,42 @@ export const cateringPlan = pgTable(
   (t) => [index("catering_wedding_idx").on(t.weddingId)],
 );
 
+/* ---------- Moodboard ---------- */
+
+export type MoodNode = {
+  id: string;
+  type: "photo" | "note" | "palette";
+  x: number;
+  y: number;
+  title: string;
+  text?: string;
+  fileId?: string;
+  // Cara foto mengisi kartu: "cover" dipotong mengikuti titik fokus (persen), "contain" tampil utuh.
+  fit?: "cover" | "contain";
+  focus?: { x: number; y: number };
+  swatches?: string[];
+  tags: string[];
+};
+export type MoodEdge = { id: string; from: string; to: string; label: string };
+export type MoodGroup = { id: string; x: number; y: number; w: number; h: number; title: string; color: string };
+export type MoodData = { nodes: MoodNode[]; edges: MoodEdge[]; groups: MoodGroup[] };
+
+// Satu baris per papan (utama, akad, resepsi). `rev` naik tiap simpan, supaya simpanan
+// dari dua anggota yang mengubah papan yang sama tidak saling menimpa diam-diam.
+export const moodboard = pgTable(
+  "moodboard",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    board: text("board").notNull(),
+    data: jsonb("data").$type<MoodData>().notNull(),
+    rev: integer("rev").notNull().default(0),
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("moodboard_wedding_board_idx").on(t.weddingId, t.board)],
+);
+
 export type Wedding = typeof wedding.$inferSelect;
 export type Member = typeof member.$inferSelect;
 export type Event = typeof event.$inferSelect;

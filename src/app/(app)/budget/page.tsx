@@ -206,7 +206,7 @@ export default async function BudgetPage() {
                         href={`/api/files/${e.receiptFileId}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold hover:bg-ground"
+                        className="hit-44 inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold hover:bg-ground"
                       >
                         <Paperclip size={14} aria-hidden="true" />
                         Bukti

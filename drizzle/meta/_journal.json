@@ -78,6 +78,13 @@
       "when": 1792137586839,
       "tag": "0010_vendor_detail",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792159298363,
+      "tag": "0011_moodboard",
+      "breakpoints": true
     }
   ]
 }

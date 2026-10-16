@@ -87,7 +87,7 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
                 href={p ? `/checklist?pic=${encodeURIComponent(p)}` : "/checklist"}
                 aria-current={on ? "true" : undefined}
                 className={cx(
-                  "flex h-9 items-center rounded-[10px] px-3 text-[13px] font-bold no-underline transition-colors duration-150",
+                  "hit-44 flex h-9 items-center rounded-[10px] px-3 text-[13px] font-bold no-underline transition-colors duration-150",
                   on ? "bg-ink text-white" : "text-ink hover:bg-ground",
                 )}
               >

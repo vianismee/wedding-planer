@@ -148,7 +148,8 @@ Kartu tidak diberi bayangan. Kartu dibedakan dari latar lewat warna (`surface` d
 
 - `position: fixed`, tengah, `bottom: 16px + env(safe-area-inset-bottom)`.
 - Latar `ink`, padding 8px, jarak antar item 4px.
-- Maksimal 5 item: Beranda, Acara, Tamu, Budget, Lainnya. Halaman lain masuk ke "Lainnya" (sheet berisi Vendor, Checklist, Seserahan, Dokumen, Pengaturan).
+- Maksimal 5 item: Beranda, Acara, Tamu, Budget, Lainnya. Halaman lain masuk ke "Lainnya" (sheet berisi Vendor, Checklist, Seserahan, Moodboard, Dokumen, Pengaturan).
+- Moodboard hanya untuk layar ≥ 768px (tablet dan web): tidak bisa dipasang di capsule, di "Lainnya" disembunyikan di bawah 768px, dan halamannya di HP hanya menampilkan penjelasan. Alasannya: menyusun dan menyambung foto butuh layar lebar.
 - Item nonaktif: lingkaran 48×48, hanya ikon, wajib `aria-label`.
 - Item aktif: melebar, latar aksen, ikon dan label teks, `aria-current="page"`.
 - Transisi lebar 200ms ease. Tanpa animasi lain.
@@ -195,6 +196,19 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 - Selisih terhadap alokasi budget dihitung otomatis dan diberi warna: hijau bila di bawah alokasi, oranye-coklat bila di atas.
 - Label "Termurah" juga dihitung, bukan ditulis tangan.
 - Pilihan ditandai dengan border `ink` 2px dan label "Dipilih" berwarna aksen.
+
+### Moodboard (pola khusus)
+
+- Kanvas bebas berisi kartu foto, catatan, dan palet, dengan kelompok bernama dan sambungan berlabel. Tiga papan: Konsep utama, Akad, Resepsi.
+- Layar penuh tanpa sidebar dan capsule (route group `(fokus)`). Tombol "Dashboard" di pojok kiri atas menjadi jalan kembali.
+- Foto di kartu bisa "Isi kartu" (dipotong mengikuti titik fokus yang dipilih) atau "Utuh". Foto dibuka penuh lewat klik dua kali, tombol perbesar di pojok kartu, atau "Lihat foto penuh" di panel.
+- Latar titik pada kanvas ikut bergeser dan membesar: penanda bahwa area itu bisa digeser dan di-zoom. Titik tidak dipakai di halaman lain.
+- Alat aktif memakai aksen (status "dipilih"). Kartu terpilih memakai border `ink` 2px.
+- Kartu palet memakai `BrandingCard` dari 21st.dev (`components/ui/color-palette.tsx`) tanpa animasi masuk, tanpa efek melayang saat hover, dan tanpa label kapital berjarak lebar. "Aa" ditulis dengan warna tergelap palet bila kontrasnya di atas putih minimal 3:1.
+- Pemilih warna memakai Cromia dari 21st.dev (`components/ui/cromia-color-picker.tsx`, dibungkus `components/color-field.tsx`). Tanpa kanal alpha karena warna palet disimpan sebagai hex 6 digit; warna cepat diambil dari palet lain di papan yang sama.
+- Semua aksi punya jalur keyboard lewat panel kanan: daftar kartu, menyambung lewat pilihan kartu, tombol panah untuk menggeser.
+- Tag bawaan hanya saran. Anggota bisa menambah tag sendiri; tag yang tidak dipakai kartu mana pun hilang dari daftar.
+- Simpan otomatis 800ms setelah perubahan. Bila anggota lain sudah menyimpan papan yang sama, simpanan ditolak dan pengguna diminta memuat ulang, bukan ditimpa diam-diam.
 
 ### Empty state
 

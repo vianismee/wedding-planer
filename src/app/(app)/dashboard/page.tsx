@@ -409,7 +409,7 @@ export default async function DashboardPage() {
         <div className="grid grid-cols-1 min-w-0 content-start gap-5 min-[900px]:grid-cols-2 min-[1200px]:grid-cols-1">
           <Card tone="ink" className="relative flex flex-col gap-2 overflow-hidden">
             <svg width="150" height="110" viewBox="0 0 150 110" fill="none" aria-hidden="true" className="absolute -bottom-4 -right-4">
-              <circle cx="55" cy="60" r="38" stroke="var(--accent)" strokeWidth="8" />
+              <circle cx="55" cy="60" r="38" stroke="#FFFFFF" strokeOpacity="0.5" strokeWidth="8" />
               <circle cx="100" cy="60" r="38" stroke="#FFFFFF" strokeOpacity="0.25" strokeWidth="8" />
             </svg>
             <div className="text-[12px] font-semibold text-[#c9c8d6]">Hitung mundur</div>

@@ -53,7 +53,7 @@ export function FileInput({
             type="button"
             onClick={() => setFile(null)}
             aria-label="Lepas lampiran"
-            className="inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface"
+            className="hit-44 inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface"
           >
             <X size={16} aria-hidden="true" />
           </button>

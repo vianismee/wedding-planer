@@ -4,6 +4,8 @@ import { getContext } from "@/lib/session";
 import { can, FILE_AREA } from "@/lib/roles";
 import { ALLOWED_MIME, MAX_UPLOAD, putObject } from "@/lib/storage";
 
+const MOOD_MIME = ["image/jpeg", "image/png", "image/webp"];
+
 
 export async function POST(req: Request) {
   const ctx = await getContext();
@@ -19,6 +21,9 @@ export async function POST(req: Request) {
   if (upload.size > MAX_UPLOAD) return NextResponse.json({ error: "Ukuran file maksimal 10 MB." }, { status: 400 });
   if (!ALLOWED_MIME.includes(upload.type))
     return NextResponse.json({ error: "Format file harus JPG, PNG, WEBP, HEIC, atau PDF." }, { status: 400 });
+  // Foto moodboard tampil langsung di kanvas, jadi hanya format yang bisa dirender semua browser.
+  if (kind === "moodboard" && !MOOD_MIME.includes(upload.type))
+    return NextResponse.json({ error: "Foto moodboard harus JPG, PNG, atau WEBP." }, { status: 400 });
 
   const id = crypto.randomUUID();
   const key = `${ctx.wedding.id}/${kind}/${id}`;

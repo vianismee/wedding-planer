@@ -99,7 +99,7 @@ function MarkedDay({
             ? "bg-accent font-extrabold text-ink"
             : "hover:bg-ground",
         !isSel && !isAkad && modifiers.today && "bg-ground font-extrabold",
-        modifiers.outside && !isSel && "text-[#a9a8b8]",
+        modifiers.outside && !isSel && "text-[#757488]",
         className,
       )}
     >
@@ -154,7 +154,7 @@ export function ScheduleCalendar({
           <span className="flex items-center">
             <Link
               href="/jadwal"
-              className="inline-flex h-9 items-center rounded-lg px-2 text-[12px] font-semibold underline-offset-2 hover:underline"
+              className="hit-44 inline-flex h-9 items-center rounded-lg px-2 text-[12px] font-semibold underline-offset-2 hover:underline"
             >
               Semua jadwal
             </Link>
@@ -164,7 +164,7 @@ export function ScheduleCalendar({
                 setSelected(akadDate);
                 setMonth(fromISO(akadDate));
               }}
-              className="inline-flex h-9 items-center rounded-lg px-2 text-[12px] font-semibold underline-offset-2 hover:underline"
+              className="hit-44 inline-flex h-9 items-center rounded-lg px-2 text-[12px] font-semibold underline-offset-2 hover:underline"
             >
               Ke akad
             </button>

@@ -51,7 +51,7 @@ function Calendar({
         week: cn("mt-1 flex w-full", d.week),
         day: cn("relative aspect-square h-full w-full p-0 text-center select-none", d.day),
         today: cn("today", d.today),
-        outside: cn("outside text-[#a9a8b8]", d.outside),
+        outside: cn("outside text-[#757488]", d.outside),
         disabled: cn("text-[#c9c8d6]", d.disabled),
         hidden: cn("invisible", d.hidden),
         ...classNames,
@@ -88,7 +88,7 @@ function CalendarDayButton({ className, day, modifiers, ...props }: React.Compon
         "relative mx-auto flex size-(--cell-size) max-w-full flex-col items-center justify-center rounded-full text-[13px] font-semibold tabular-nums transition-colors duration-150 hover:bg-ground",
         "data-[today]:font-extrabold data-[today]:not-data-[selected]:bg-ground",
         "data-[selected]:bg-ink data-[selected]:text-white data-[selected]:hover:bg-ink",
-        modifiers.outside && "text-[#a9a8b8]",
+        modifiers.outside && "text-[#757488]",
         className
       )}
       {...props}

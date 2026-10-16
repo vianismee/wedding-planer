@@ -61,8 +61,8 @@ export function DateField({
               data-slot="date-trigger"
               aria-label={ariaLabel}
               className={cn(
-                "flex h-11 w-full items-center gap-2.5 rounded-xl border border-transparent bg-ground px-3.5 text-left text-[14px] transition-colors duration-150 hover:border-line",
-                !current && "text-[#8a899c]",
+                "flex h-11 w-full items-center gap-2.5 rounded-xl border border-outline bg-ground px-3.5 text-left text-[14px] transition-colors duration-150 hover:border-[#9c9bae]",
+                !current && "text-[#6b6a7d]",
                 className,
               )}
             >
@@ -75,7 +75,7 @@ export function DateField({
               type="button"
               aria-label="Kosongkan tanggal"
               onClick={() => set("")}
-              className="absolute top-1/2 right-1 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted hover:bg-surface"
+              className="hit-44 absolute top-1/2 right-1 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted hover:bg-surface"
             >
               <X className="size-4" aria-hidden="true" />
             </button>

@@ -22,7 +22,7 @@ const VARIANT: Record<Variant, string> = {
 export function buttonClass(variant: Variant = "primary", size: "md" | "sm" = "md") {
   return cx(
     "inline-flex shrink-0 items-center justify-center gap-2 rounded-xl font-bold transition-colors duration-150 disabled:cursor-not-allowed disabled:border disabled:border-[#d9d8e4] disabled:bg-transparent disabled:text-muted",
-    size === "md" ? "h-11 px-4 text-[13px]" : "h-9 px-3 text-[12px]",
+    size === "md" ? "h-11 px-4 text-[13px]" : "hit-44 h-9 px-3 text-[12px]",
     VARIANT[variant],
   );
 }
@@ -154,7 +154,7 @@ export function PageHeader({
 /* ---------- Isian form ---------- */
 
 const inputBase =
-  "w-full rounded-xl border border-transparent bg-ground px-3.5 text-[14px] text-ink placeholder:text-[#8a899c] transition-colors duration-150 hover:border-line focus:outline-none";
+  "w-full rounded-xl border border-outline bg-ground px-3.5 text-[14px] text-ink placeholder:text-[#6b6a7d] transition-colors duration-150 hover:border-[#9c9bae] focus:outline-none";
 
 export function Field({
   label,

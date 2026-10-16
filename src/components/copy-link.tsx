@@ -21,7 +21,7 @@ export function CopyLink({ url }: { url: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}
-        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-bold text-white"
+        className="hit-44 inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 text-[12px] font-bold text-white"
       >
         {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
         {copied ? "Tersalin" : "Salin"}

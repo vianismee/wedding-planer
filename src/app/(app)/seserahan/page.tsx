@@ -80,7 +80,7 @@ export default async function SeserahanPage() {
                       <FormDialog
                         variant="icon"
                         triggerLabel={`Ubah nama kategori ${cat}`}
-                        triggerClassName="size-9 shrink-0"
+                        triggerClassName="hit-44 size-9 shrink-0"
                         title="Ubah nama kategori"
                         description={`Nama baru berlaku untuk ${list.length} item di kategori ini.`}
                         action={renameCategory.bind(null, cat)}

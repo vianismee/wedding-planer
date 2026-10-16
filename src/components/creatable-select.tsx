@@ -62,8 +62,8 @@ export function CreatableSelect({
             aria-label={ariaLabel}
             data-slot="select-trigger"
             className={cn(
-              "flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-transparent bg-ground px-3.5 text-left text-[14px] transition-colors duration-150 hover:border-line",
-              !value && "text-[#8a899c]",
+              "flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-outline bg-ground px-3.5 text-left text-[14px] transition-colors duration-150 hover:border-[#9c9bae]",
+              !value && "text-[#6b6a7d]",
               className,
             )}
           >

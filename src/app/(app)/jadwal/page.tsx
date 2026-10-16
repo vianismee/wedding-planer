@@ -121,7 +121,7 @@ export default async function JadwalPage({ searchParams }: { searchParams: Promi
                 href={href({ jenis: k.id, waktu: past ? "lewat" : undefined })}
                 aria-current={on ? "true" : undefined}
                 className={cx(
-                  "flex h-9 items-center gap-1.5 rounded-[10px] px-3 text-[13px] font-bold no-underline transition-colors duration-150",
+                  "hit-44 flex h-9 items-center gap-1.5 rounded-[10px] px-3 text-[13px] font-bold no-underline transition-colors duration-150",
                   on ? "bg-ink text-white" : "text-ink hover:bg-ground",
                 )}
               >

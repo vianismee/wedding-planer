@@ -24,7 +24,7 @@ function CommandInput({ className, ...props }: React.ComponentProps<typeof Comma
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-11 w-full bg-transparent text-[14px] outline-none placeholder:text-[#8a899c] disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-11 w-full bg-transparent text-[14px] outline-none placeholder:text-[#6b6a7d] disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}

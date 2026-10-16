@@ -16,6 +16,7 @@ import {
   Users,
   Wallet,
   Utensils,
+  Images,
   Ellipsis,
   SlidersHorizontal,
   ArrowUp,
@@ -40,6 +41,7 @@ export type NavId =
   | "checklist"
   | "seserahan"
   | "dokumen"
+  | "moodboard"
   | "pengaturan";
 
 const ITEMS: Record<
@@ -86,6 +88,12 @@ const ITEMS: Record<
     short: "Dokumen",
     icon: FileText,
   },
+  moodboard: {
+    href: "/moodboard",
+    label: "Moodboard",
+    short: "Moodboard",
+    icon: Images,
+  },
   pengaturan: {
     href: "/pengaturan",
     label: "Pengaturan",
@@ -127,7 +135,7 @@ export function Sidebar({
         className="flex items-center gap-2.5 px-2 text-white no-underline"
       >
         <span
-          className="flex size-9 items-center justify-center rounded-full bg-accent"
+          className="flex size-9 items-center justify-center rounded-full bg-white"
           aria-hidden="true"
         >
           <svg
@@ -206,6 +214,9 @@ export function Sidebar({
 }
 
 /** Capsule bar untuk layar di bawah 900px (DESIGN.md 5). Maksimal 5 item. */
+// Menu yang hanya bisa dipakai di tablet dan laptop: tidak boleh masuk capsule,
+// dan di menu Lainnya hanya muncul mulai 768px.
+const WIDE_ONLY: NavId[] = ["moodboard"];
 const CAPSULE_MAX = 4;
 const CAPSULE_DEFAULT: NavId[] = [
   "dashboard",
@@ -232,7 +243,7 @@ export function Capsule({
   const [editing, setEditing] = useState(false);
   // Pilihan anggota (bila ada) dipakai lebih dulu; menu yang tidak boleh dibuka perannya diabaikan.
   const custom = (saved ?? [])
-    .filter((i): i is NavId => items.includes(i as NavId))
+    .filter((i): i is NavId => items.includes(i as NavId) && !WIDE_ONLY.includes(i as NavId))
     .slice(0, CAPSULE_MAX);
   const primary = custom.length ? custom : defaultCapsule(items);
   const rest = items.filter((i) => !primary.includes(i));
@@ -296,7 +307,7 @@ export function Capsule({
       >
         {editing ? (
           <CapsuleEditor
-            items={items}
+            items={items.filter((i) => !WIDE_ONLY.includes(i))}
             current={primary}
             isCustom={custom.length > 0}
             onDone={() => setEditing(false)}
@@ -317,6 +328,7 @@ export function Capsule({
                     className={cx(
                       "flex min-h-14 items-center gap-3 rounded-2xl px-4 text-[14px] font-semibold no-underline",
                       active ? "bg-accent text-ink" : "bg-ground text-ink",
+                      WIDE_ONLY.includes(id) && "max-[767px]:hidden",
                     )}
                   >
                     <Icon size={18} aria-hidden="true" />
@@ -416,7 +428,7 @@ function CapsuleEditor({
                   </span>
                   <button
                     type="button"
-                    aria-label={`Geser ${it.label} ke kiri`}
+                    aria-label={`Naikkan ${it.label}`}
                     disabled={i === 0}
                     onClick={() => move(i, -1)}
                     className="inline-flex size-11 items-center justify-center rounded-xl hover:bg-surface disabled:opacity-30"
@@ -425,7 +437,7 @@ function CapsuleEditor({
                   </button>
                   <button
                     type="button"
-                    aria-label={`Geser ${it.label} ke kanan`}
+                    aria-label={`Turunkan ${it.label}`}
                     disabled={i === picked.length - 1}
                     onClick={() => move(i, 1)}
                     className="inline-flex size-11 items-center justify-center rounded-xl hover:bg-surface disabled:opacity-30"

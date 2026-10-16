@@ -9,7 +9,7 @@ export const ROLE_LABEL: Record<Role, string> = {
 
 export const ROLE_HELP: Record<Exclude<Role, "pemilik">, string> = {
   pasangan: "Akses penuh, termasuk budget, vendor, dan dokumen.",
-  keluarga: "Mengelola tamu, checklist, dan seserahan. Tidak melihat budget dan dokumen.",
+  keluarga: "Mengelola tamu, checklist, seserahan, dan moodboard. Tidak melihat budget dan dokumen.",
   panitia: "Hanya melihat rundown dan tugasnya sendiri.",
 };
 
@@ -25,6 +25,7 @@ export type Area =
   | "checklist"
   | "seserahan"
   | "dokumen"
+  | "moodboard"
   | "pengaturan";
 
 const FULL: Role[] = ["pemilik", "pasangan"];
@@ -41,6 +42,7 @@ export const ACCESS: Record<Area, Role[]> = {
   checklist: [...FULL, "keluarga", "panitia"],
   seserahan: [...FULL, "keluarga"],
   dokumen: FULL,
+  moodboard: [...FULL, "keluarga"],
   pengaturan: FULL,
 };
 
@@ -52,4 +54,4 @@ export const MAX_MEMBERS = 10;
 
 // Jenis file menentukan siapa yang boleh mengunggah dan melihat.
 // Scan dokumen (KTP, KK, akta) hanya untuk peran Pasangan.
-export const FILE_AREA: Record<string, Area> = { receipt: "budget", offer: "vendor", document: "dokumen" };
+export const FILE_AREA: Record<string, Area> = { receipt: "budget", offer: "vendor", document: "dokumen", moodboard: "moodboard" };

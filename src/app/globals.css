@@ -106,8 +106,7 @@
   }
 }
 
-/* Fokus keyboard tetap terlihat untuk tombol dan link (aksesibilitas).
-   Isian form tidak diberi tanda fokus. */
+/* Fokus keyboard selalu terlihat (DESIGN.md 10): outline 2px ink untuk tombol dan link. */
 :focus-visible {
   outline: 2px solid #1c1b29;
   outline-offset: 2px;
@@ -116,20 +115,47 @@
 .on-ink:focus-visible {
   outline-color: #ffffff;
 }
-input:focus,
-input:focus-visible,
+/* Isian memakai border ink saat fokus (juga saat diklik), supaya jelas kolom mana yang sedang diisi. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
 textarea:focus,
-textarea:focus-visible,
 select:focus,
-select:focus-visible,
-[data-slot="select-trigger"]:focus,
 [data-slot="select-trigger"]:focus-visible,
-[data-slot="date-trigger"]:focus,
+[data-slot="select-trigger"][data-state="open"],
 [data-slot="date-trigger"]:focus-visible,
+[data-slot="date-trigger"][data-state="open"] {
+  outline: none;
+  border-color: #1c1b29 !important;
+  box-shadow: 0 0 0 1px #1c1b29;
+}
+input[cmdk-input]:focus {
+  box-shadow: none !important;
+}
+/* Isian di dalam color picker sudah dibingkai label: tanda fokus pindah ke bingkainya. */
+input[data-color-picker-input]:focus {
+  box-shadow: none !important;
+}
+label:has(> input[data-color-picker-input]:focus-visible),
+label:has(> input[data-color-picker-input]:focus) {
+  border-color: #1c1b29;
+  box-shadow: 0 0 0 1px #1c1b29;
+}
 [data-slot="dialog-content"]:focus,
 [data-slot="alert-dialog-content"]:focus {
   outline: none;
-  box-shadow: none;
+}
+
+/* Area sentuh minimal 44px tanpa mengubah ukuran visual elemen yang lebih kecil (DESIGN.md 10). */
+.hit-44:not(.absolute):not(.fixed) {
+  position: relative;
+}
+.hit-44::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
 }
 
 /* Hanya hover/press 150ms dan lebar capsule 200ms. */

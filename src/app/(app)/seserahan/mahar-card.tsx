@@ -54,7 +54,7 @@ export function MaharCard({ items }: { items: MaharItem[] }) {
                     <span className="block text-[15px] font-bold leading-snug">{m.name}</span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-[#d9d8e4]">
                       {m.value > 0 && <span>{rupiahShort(m.value)}</span>}
-                      <span className={m.status === "terbeli" ? "text-[#d6f06b]" : ""}>{m.status === "terbeli" ? "Sudah dibeli" : "Belum dibeli"}</span>
+                      <span className={m.status === "terbeli" ? "text-accent" : ""}>{m.status === "terbeli" ? "Sudah dibeli" : "Belum dibeli"}</span>
                       {m.purchaseUrl && (
                         <span className="inline-flex items-center gap-1">
                           <Link2 size={12} aria-hidden="true" />

@@ -3,7 +3,7 @@ import { getContext, getSession } from "@/lib/session";
 import { can } from "@/lib/roles";
 import { Capsule, Sidebar, type NavId } from "@/components/nav";
 
-const ORDER: NavId[] = ["dashboard", "acara", "jadwal", "tamu", "budget", "catering", "vendor", "checklist", "seserahan", "dokumen", "pengaturan"];
+const ORDER: NavId[] = ["dashboard", "acara", "jadwal", "tamu", "budget", "catering", "vendor", "checklist", "seserahan", "moodboard", "dokumen", "pengaturan"];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   if (!(await getSession())) redirect("/masuk");
