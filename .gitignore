@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local data (PGlite, uploads)
+/.data
+!.env.example
+
+# screenshot bug lokal
+/bug

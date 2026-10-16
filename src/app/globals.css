@@ -1,26 +1,161 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
+/* Token dari DESIGN.md bagian 2, termasuk variabel shadcn. MVP hanya tema terang. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f2f1f6;
+  --foreground: #1c1b29;
+  --card: #ffffff;
+  --card-foreground: #1c1b29;
+  --popover: #ffffff;
+  --popover-foreground: #1c1b29;
+  --muted: #f2f1f6;
+  --muted-foreground: #5e5d70;
+  --border: #e3e2ea;
+  --input: #e3e2ea;
+  --ring: #1c1b29;
+  --primary: #1c1b29;
+  --primary-foreground: #ffffff;
+  --secondary: #ffffff;
+  --secondary-foreground: #1c1b29;
+  --accent: #d6f06b;
+  --accent-foreground: #1c1b29;
+  --destructive: #b42318;
+  --radius: 12px;
+
+  --surface-sunken: #f7f6fa;
+  --status-ok-bg: #eef7cc;
+  --status-ok-fg: #3d5a0c;
+  --status-info-bg: #e7e4fb;
+  --status-info-fg: #3b2f8f;
+  --status-warn-bg: #fce5d8;
+  --status-warn-fg: #8a3b12;
+  --note-bg: #fbf0d9;
+  --note-fg: #6b4a12;
+  color-scheme: light;
 }
 
 @theme inline {
+  /* Token proyek */
+  --color-ink: #1c1b29;
+  --color-ground: #f2f1f6;
+  --color-surface: #ffffff;
+  --color-sunken: var(--surface-sunken);
+  --color-muted: #5e5d70;
+  --color-line: #e3e2ea;
+  --color-outline: #c9c8d6;
+  --color-nav: #d9d8e4;
+  --color-danger: var(--destructive);
+  --color-ok-bg: var(--status-ok-bg);
+  --color-ok-fg: var(--status-ok-fg);
+  --color-info-bg: var(--status-info-bg);
+  --color-info-fg: var(--status-info-fg);
+  --color-warn-bg: var(--status-warn-bg);
+  --color-warn-fg: var(--status-warn-fg);
+  --color-note-bg: var(--note-bg);
+  --color-note-fg: var(--note-fg);
+  --shadow-float: 0 10px 30px rgba(28, 27, 41, 0.28);
+  --shadow-bar: 0 8px 24px rgba(28, 27, 41, 0.16);
+  --font-sans: var(--font-jakarta), "Segoe UI", system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+
+  /* Token shadcn */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Fokus keyboard tetap terlihat untuk tombol dan link (aksesibilitas).
+   Isian form tidak diberi tanda fokus. */
+:focus-visible {
+  outline: 2px solid #1c1b29;
+  outline-offset: 2px;
+}
+.on-ink :focus-visible,
+.on-ink:focus-visible {
+  outline-color: #ffffff;
+}
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+[data-slot="select-trigger"]:focus,
+[data-slot="select-trigger"]:focus-visible,
+[data-slot="date-trigger"]:focus,
+[data-slot="date-trigger"]:focus-visible,
+[data-slot="dialog-content"]:focus,
+[data-slot="alert-dialog-content"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Hanya hover/press 150ms dan lebar capsule 200ms. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 200ms ease both;
 }

@@ -1,69 +1,77 @@
-import Image from "next/image";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { CalendarDays, FileText, Gift, ListChecks, Store, Users, Wallet } from "lucide-react";
+import { getSession } from "@/lib/session";
 
-export default function Home() {
+const FEATURES = [
+  { icon: CalendarDays, title: "Rangkaian acara sesuai adat", text: "Jawa, Sunda, atau nasional, lengkap dengan rundown yang bisa dibagikan ke panitia." },
+  { icon: Users, title: "Daftar tamu per pihak", text: "Kuota keluarga pria dan wanita, import dari Excel, dan estimasi porsi catering." },
+  { icon: Wallet, title: "Budget dan termin", text: "Anggaran per kategori, sumber dana tiap keluarga, dan pengingat DP sebelum jatuh tempo." },
+  { icon: Store, title: "Bandingkan penawaran vendor", text: "Selisih terhadap alokasi dan penawaran termurah dihitung otomatis." },
+  { icon: ListChecks, title: "Checklist mundur dari akad", text: "Tugas tersusun per rentang waktu dan bergeser bila tanggal akad berubah." },
+  { icon: Gift, title: "Seserahan dan mahar", text: "Status beli, harga, dan siapa yang mengurus tiap item." },
+  { icon: FileText, title: "Dokumen nikah", text: "Checklist KUA atau Dukcapil per calon pengantin, dengan scan yang disimpan privat." },
+];
+
+export default async function Home() {
+  if (await getSession()) redirect("/dashboard");
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main className="mx-auto flex max-w-[1120px] flex-col gap-10 px-4 py-6 sm:py-10">
+      <nav className="flex items-center justify-between">
+        <span className="flex items-center gap-2.5">
+          <span className="flex size-9 items-center justify-center rounded-full bg-ink" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D6F06B" strokeWidth="2.2">
+              <circle cx="9" cy="13" r="5" />
+              <circle cx="15" cy="13" r="5" />
+            </svg>
+          </span>
+          <span className="text-[22px] font-extrabold tracking-[-0.02em]">Rukun</span>
+        </span>
+        <Link href="/masuk" className="inline-flex h-11 items-center rounded-xl px-4 text-[14px] font-bold no-underline hover:bg-surface">
+          Masuk
+        </Link>
+      </nav>
+
+      <section className="on-ink flex flex-col gap-5 rounded-[28px] bg-ink p-6 text-white sm:p-10">
+        <h1 className="max-w-[720px] text-[34px] font-extrabold leading-[1.1] tracking-[-0.02em] sm:text-[44px]">
+          Satu tempat untuk mengurus pernikahan bersama keluarga.
+        </h1>
+        <p className="max-w-[600px] text-[16px] leading-[1.5] text-[#d9d8e4]">
+          Rangkaian adat, ratusan tamu dari dua keluarga, termin vendor, dan dokumen KUA. Tidak lagi tersebar di grup WhatsApp, Excel, dan
+          catatan orang tua.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/masuk"
+            className="inline-flex h-12 items-center rounded-xl bg-white px-5 text-[14px] font-bold text-ink no-underline hover:bg-[#ececf3]"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Mulai gratis
+          </Link>
         </div>
-      </main>
-    </div>
+      </section>
+
+      <section aria-labelledby="fitur" className="flex flex-col gap-4">
+        <h2 id="fitur" className="text-[20px] font-extrabold">
+          Isi ruang kerjanya
+        </h2>
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 min-[960px]:grid-cols-3">
+          {FEATURES.map((f) => {
+            const Icon = f.icon;
+            return (
+              <li key={f.title} className="flex flex-col gap-2 rounded-[22px] bg-surface p-5">
+                <Icon size={20} aria-hidden="true" />
+                <h3 className="text-[15px] font-bold">{f.title}</h3>
+                <p className="text-[13px] text-muted">{f.text}</p>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <footer className="flex flex-wrap gap-4 border-t border-line pt-6 text-[13px] text-muted">
+        <span>Rukun, nama kerja</span>
+        <Link href="/privasi">Kebijakan privasi</Link>
+      </footer>
+    </main>
   );
 }

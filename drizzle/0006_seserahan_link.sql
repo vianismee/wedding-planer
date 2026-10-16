@@ -1,0 +1,1 @@
+ALTER TABLE "seserahan_item" ADD COLUMN "purchase_url" text;

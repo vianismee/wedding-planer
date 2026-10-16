@@ -1,0 +1,76 @@
+# Satu VPS: Caddy -> Next.js, PostgreSQL, Redis (BullMQ), MinIO. Lihat PRD bagian spesifikasi teknis.
+services:
+  app:
+    build:
+      context: .
+      target: app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://rukun:${POSTGRES_PASSWORD}@postgres:5432/rukun
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+    depends_on: [postgres, redis, minio]
+
+  worker:
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BETTER_AUTH_URL: http://app:3000
+      REDIS_URL: redis://redis:6379
+    depends_on: [app, redis]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rukun
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: rukun
+    volumes: [pgdata:/var/lib/postgresql/data]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: [redisdata:/data]
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Enkripsi saat disimpan (SSE-S3) untuk scan KTP/KK/akta.
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
+    volumes: [miniodata:/data]
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "sleep 5; mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb -p local/rukun-private; mc anonymous set none local/rukun-private; mc encrypt set sse-s3 local/rukun-private"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [app]
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  caddydata:
