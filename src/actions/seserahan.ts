@@ -142,3 +142,29 @@ export async function deleteMahar(id: string): Promise<ActionResult> {
     done();
   });
 }
+
+/**
+ * Mengganti nama kategori seserahan untuk semua item di dalamnya.
+ * Bila nama baru sudah dipakai kategori lain, kedua kategori otomatis tergabung.
+ */
+export async function renameCategory(oldName: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("seserahan");
+    const name = z.string().trim().min(1, "Isi nama kategori.").max(60, "Nama kategori maksimal 60 karakter.").parse(str(fd, "name"));
+    if (name === oldName) return;
+    const existing = await db
+      .select({ category: schema.seserahanItem.category })
+      .from(schema.seserahanItem)
+      .where(eq(schema.seserahanItem.weddingId, ctx.wedding.id));
+    const names = new Set(existing.map((e) => e.category));
+    if (!names.has(oldName)) throw new UserError("Kategori tidak ditemukan.");
+    // Nama yang sama tapi beda huruf besar/kecil dianggap kategori yang sama.
+    const target = [...names].find((n) => n !== oldName && n.toLowerCase() === name.toLowerCase()) ?? name;
+    await db
+      .update(schema.seserahanItem)
+      .set({ category: target })
+      .where(and(eq(schema.seserahanItem.weddingId, ctx.wedding.id), eq(schema.seserahanItem.category, oldName)));
+    done();
+    return names.has(target) ? `Kategori ${oldName} digabung ke ${target}.` : `Kategori diganti menjadi ${target}.`;
+  });
+}

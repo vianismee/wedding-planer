@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import { asc, eq } from "drizzle-orm";
-import { Plus } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
-import { dateShort, rupiahShort } from "@/lib/format";
-import { addItem } from "@/actions/seserahan";
+import { dateShort, rupiah } from "@/lib/format";
+import { addItem, renameCategory } from "@/actions/seserahan";
 import { FormDialog } from "@/components/forms";
-import { Card, PageHeader, Progress, SectionTitle, Status } from "@/components/kit";
+import { Card, Field, Input, PageHeader, Progress, SectionTitle, Status } from "@/components/kit";
 import type { SeserahanItem } from "@/db/schema";
 import { MaharCard } from "./mahar-card";
 import { ItemStatus } from "./item-status";
@@ -31,6 +31,13 @@ export default async function SeserahanPage() {
   const bought = items.filter((i) => i.status === "terbeli");
   const spent = bought.reduce((s, i) => s + i.price, 0);
   const planned = items.reduce((s, i) => s + i.price, 0);
+  // Total gabungan seserahan dan mahar.
+  const maharTotal = maharItems.reduce((s, m) => s + m.value, 0);
+  const maharSpent = maharItems.filter((m) => m.status === "terbeli").reduce((s, m) => s + m.value, 0);
+  const grand = planned + maharTotal;
+  const grandSpent = spent + maharSpent;
+  const allCount = items.length + maharItems.length;
+  const allBought = bought.length + maharItems.filter((m) => m.status === "terbeli").length;
 
   return (
     <>
@@ -63,11 +70,30 @@ export default async function SeserahanPage() {
           )}
           {[...groups.entries()].map(([cat, list]) => {
             const done = list.filter((i) => i.status === "terbeli").length;
+            const subtotal = list.reduce((s, i) => s + i.price, 0);
             return (
               <section key={cat} className="flex flex-col gap-1 rounded-[22px] bg-surface p-4" aria-label={cat}>
-                <div className="flex items-center justify-between gap-2 pb-1">
-                  <h2 className="text-[16px] font-bold">{cat}</h2>
-                  <Status tone={done === list.length ? "ok" : "neutral"}>
+                <div className="flex items-start justify-between gap-2 pb-1">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-0.5">
+                      <h2 className="truncate text-[16px] font-bold">{cat}</h2>
+                      <FormDialog
+                        variant="icon"
+                        triggerLabel={`Ubah nama kategori ${cat}`}
+                        triggerClassName="size-9 shrink-0"
+                        title="Ubah nama kategori"
+                        description={`Nama baru berlaku untuk ${list.length} item di kategori ini.`}
+                        action={renameCategory.bind(null, cat)}
+                        trigger={<Pencil size={14} aria-hidden="true" />}
+                      >
+                        <Field label="Nama kategori" hint="Bila sama dengan kategori lain, kedua kategori akan digabung.">
+                          <Input name="name" required defaultValue={cat} maxLength={60} />
+                        </Field>
+                      </FormDialog>
+                    </div>
+                    <p className="text-[12px] text-muted">{subtotal > 0 ? `Subtotal ${rupiah(subtotal)}` : "Harga belum diisi"}</p>
+                  </div>
+                  <Status tone={done === list.length ? "ok" : "neutral"} className="mt-1.5">
                     {done} dari {list.length}
                   </Status>
                 </div>
@@ -88,25 +114,37 @@ export default async function SeserahanPage() {
           <Card className="flex flex-col gap-3">
             <SectionTitle>Ringkasan</SectionTitle>
             <div>
-              <p className="text-[24px] font-extrabold tracking-[-0.02em]">
-                {bought.length} <span className="text-[14px] font-semibold text-muted">dari {items.length} item terbeli</span>
-              </p>
-              <Progress value={items.length ? (bought.length / items.length) * 100 : 0} label="Item terbeli" className="mt-2" />
+              <p className="text-[12px] font-semibold text-muted">Total seserahan dan mahar</p>
+              <p className="text-[26px] font-extrabold leading-tight tracking-[-0.02em] tabular">{rupiah(grand)}</p>
             </div>
             <dl className="flex flex-col gap-2 text-[13px]">
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Sudah dibelanjakan</dt>
-                <dd className="font-bold">{rupiahShort(spent)}</dd>
+                <dt className="text-muted">Seserahan, {items.length} item</dt>
+                <dd className="font-bold tabular">{rupiah(planned)}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Total perkiraan</dt>
-                <dd className="font-bold">{rupiahShort(planned)}</dd>
+                <dt className="text-muted">Mahar, {maharItems.length} item</dt>
+                <dd className="font-bold tabular">{rupiah(maharTotal)}</dd>
+              </div>
+              <div className="flex justify-between gap-2 border-t border-ground pt-2">
+                <dt className="text-muted">Sudah dibeli</dt>
+                <dd className="font-bold tabular">{rupiah(grandSpent)}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Masih dipesan</dt>
-                <dd className="font-bold">{items.filter((i) => i.status === "dipesan").length} item</dd>
+                <dt className="text-muted">Belum dibeli</dt>
+                <dd className="font-bold tabular">{rupiah(Math.max(0, grand - grandSpent))}</dd>
               </div>
             </dl>
+            <div>
+              <p className="text-[13px] font-semibold">
+                {allBought} dari {allCount} item terbeli
+                {items.some((i) => i.status === "dipesan") ? `, ${items.filter((i) => i.status === "dipesan").length} masih dipesan` : ""}
+              </p>
+              <Progress value={allCount ? (allBought / allCount) * 100 : 0} label="Item terbeli" className="mt-2" />
+            </div>
+            {items.some((i) => !i.price) && (
+              <p className="text-[12px] text-muted">{items.filter((i) => !i.price).length} item belum diisi harganya, jadi belum masuk total.</p>
+            )}
           </Card>
         </div>
       </div>
