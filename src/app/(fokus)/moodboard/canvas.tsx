@@ -132,6 +132,18 @@ export function MoodboardCanvas({
     boardsRef.current = boards;
   }, [boards]);
 
+  // Papan disimpan anggota lain (data halaman dimuat ulang lewat LiveRefresh): pakai versi terbaru
+  // bila di tab ini tidak ada perubahan yang belum tersimpan, supaya tidak menimpa kerja sendiri.
+  useEffect(() => {
+    const fresh = Object.keys(initialRev).filter(
+      (id) => initialRev[id as MoodBoardId] > (revs.current[id] ?? 0) && !dirty.current.has(id) && !flushing.current,
+    );
+    if (!fresh.length) return;
+    for (const id of fresh) revs.current[id] = initialRev[id as MoodBoardId];
+    setBoards((prev) => ({ ...prev, ...Object.fromEntries(fresh.map((id) => [id, initial[id as MoodBoardId]])) }));
+    setSave((s) => ({ ...s, ...Object.fromEntries(fresh.map((id) => [id, "saved" as SaveState])) }));
+  }, [initial, initialRev]);
+
   // Peringatkan sebelum menutup tab bila masih ada perubahan yang belum tersimpan.
   useEffect(() => {
     const onLeave = (e: BeforeUnloadEvent) => {

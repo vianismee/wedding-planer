@@ -1,5 +1,7 @@
 {$DOMAIN:localhost} {
-	encode zstd gzip
+	# Aliran /api/live (server-sent events) tidak dikompresi supaya sinyal langsung sampai.
+	@compress not path /api/live
+	encode @compress zstd gzip
 	request_body {
 		max_size 12MB
 	}

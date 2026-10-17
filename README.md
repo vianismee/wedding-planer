@@ -76,3 +76,9 @@ ssh ubuntu@<server> 'bash /srv/rukun/repo/scripts/deploy-vps.sh'
 ```
 
 Migrasi database berjalan otomatis saat service start. Log: `journalctl -u rukun -f`.
+
+Reset kata sandi pengguna yang lupa (aplikasi tidak mengirim email). Semua sesi pengguna itu ikut keluar, lalu dia bisa menggantinya sendiri di Pengaturan:
+
+```bash
+cd /srv/rukun/repo && npx tsx --env-file=/srv/rukun/.env.production.local scripts/reset-password.ts <email> <kata-sandi-sementara>
+```

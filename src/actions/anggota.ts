@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { getContext, getSession, isMember, requireAction, WEDDING_COOKIE } from "@/lib/session";
@@ -11,6 +11,7 @@ import { ACCESS, can, MAX_MEMBERS, ROLE_LABEL, type Area, type Role } from "@/li
 import { sendMail } from "@/lib/mailer";
 import { INVITE_COOKIE } from "@/lib/invites";
 import { track } from "@/lib/analytics";
+import { PASSWORD_MAX, PASSWORD_MIN, setUserPassword } from "@/lib/password";
 
 const inviteRole = z.enum(["pasangan", "keluarga", "panitia"], { message: "Pilih peran." });
 
@@ -121,6 +122,28 @@ export async function updateProfile(fd: FormData): Promise<ActionResult> {
     await db.update(schema.user).set({ name }).where(eq(schema.user.id, session.user.id));
     revalidatePath("/", "layout");
     return "Nama tersimpan.";
+  });
+}
+
+/**
+ * Mengganti kata sandi langsung dari Pengaturan, tanpa kode email dan tanpa kata sandi lama
+ * (aplikasi tidak mengirim email). Perangkat lain yang masih masuk dikeluarkan.
+ */
+export async function setPassword(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const session = await getSession();
+    if (!session) throw new UserError("Sesi berakhir. Silakan masuk lagi.");
+    const password = z
+      .string()
+      .min(PASSWORD_MIN, `Kata sandi minimal ${PASSWORD_MIN} karakter.`)
+      .max(PASSWORD_MAX, `Kata sandi maksimal ${PASSWORD_MAX} karakter.`)
+      .parse(String(fd.get("password") ?? ""));
+    if (password !== String(fd.get("confirm") ?? "")) throw new UserError("Ulangi kata sandi yang sama di kolom kedua.");
+    await setUserPassword(session.user.id, password);
+    await db
+      .delete(schema.session)
+      .where(and(eq(schema.session.userId, session.user.id), ne(schema.session.id, session.session.id)));
+    return "Kata sandi baru tersimpan. Perangkat lain yang masih masuk sudah dikeluarkan.";
   });
 }
 

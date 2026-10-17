@@ -2,7 +2,7 @@
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useActionState, useDeferredValue, useMemo, useState, useTransition } from "react";
-import { FileSpreadsheet, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileSpreadsheet, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { addGuest, deleteGuest, setGuestsStatus, updateGuest } from "@/actions/tamu";
 import { Modal, type ActionResult, submitWith } from "@/components/forms";
 import { useConfirm } from "@/components/confirm";
@@ -26,7 +26,7 @@ export type GuestRow = {
   vip: boolean;
 };
 
-const PAGE = 100;
+const PAGE_SIZES = [25, 50, 100];
 const deliveryName = (id: string) => DELIVERY.find((d) => d.id === id)?.name ?? id;
 const statusOf = (id: string) => GUEST_STATUS.find((s) => s.id === id) ?? GUEST_STATUS[0];
 
@@ -36,7 +36,8 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
   const [session, setSession] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(PAGE);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
   const [editing, setEditing] = useState<GuestRow | "new" | null>(null);
   const [importing, setImporting] = useState(false);
   const [pending, start] = useTransition();
@@ -69,7 +70,11 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
       .map((x) => x.g);
   }, [indexed, cat, side, session, status, q]);
 
-  const shown = filtered.slice(0, limit);
+  const pages = Math.max(1, Math.ceil(filtered.length / perPage));
+  // Halaman bisa melewati batas bila tamu dihapus atau filter berubah dari tab lain.
+  const current = Math.min(page, pages);
+  const from = (current - 1) * perPage;
+  const shown = filtered.slice(from, from + perPage);
   const filteredPax = filtered.reduce((s, g) => s + g.pax, 0);
   const existingNames = useMemo(() => new Set(guests.map((g) => g.name.trim().toLowerCase())), [guests]);
 
@@ -107,7 +112,7 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setLimit(PAGE);
+              setPage(1);
             }}
             placeholder="Cari nama atau keterangan"
             className="pl-10"
@@ -124,7 +129,7 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
               aria-pressed={cat === c}
               onClick={() => {
                 setCat(c);
-                setLimit(PAGE);
+                setPage(1);
               }}
               className={cx(
                 "hit-44 flex h-9 items-center gap-1.5 rounded-[10px] px-3 text-[13px] font-bold transition-colors duration-150",
@@ -137,9 +142,18 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
           ))}
         </div>
         <div className="flex flex-wrap gap-2">
-          <SelectField aria-label="Filter pihak" value={side} onValueChange={(v) => setSide(v)} className="h-10 w-auto!" options={[{ value: "", label: "Semua pihak" }, { value: "pria", label: "Pihak pria" }, { value: "wanita", label: "Pihak wanita" }]} />
-          <SelectField aria-label="Filter sesi" value={session} onValueChange={(v) => setSession(v)} className="h-10 w-auto!" options={[{ value: "", label: "Semua sesi" }, ...sessions.map((s) => ({ value: s, label: s }))]} />
-          <SelectField aria-label="Filter status" value={status} onValueChange={(v) => setStatus(v)} className="h-10 w-auto!" options={[{ value: "", label: "Semua status" }, ...GUEST_STATUS.map((s) => ({ value: s.id, label: s.name }))]} />
+          <SelectField aria-label="Filter pihak" value={side} onValueChange={(v) => {
+            setSide(v);
+            setPage(1);
+          }} className="h-10 w-auto!" options={[{ value: "", label: "Semua pihak" }, { value: "pria", label: "Pihak pria" }, { value: "wanita", label: "Pihak wanita" }]} />
+          <SelectField aria-label="Filter sesi" value={session} onValueChange={(v) => {
+            setSession(v);
+            setPage(1);
+          }} className="h-10 w-auto!" options={[{ value: "", label: "Semua sesi" }, ...sessions.map((s) => ({ value: s, label: s }))]} />
+          <SelectField aria-label="Filter status" value={status} onValueChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }} className="h-10 w-auto!" options={[{ value: "", label: "Semua status" }, ...GUEST_STATUS.map((s) => ({ value: s.id, label: s.name }))]} />
           {filtered.some((g) => g.status !== "terkirim") && (
             <Button variant="ghost" size="sm" className="h-10" onClick={markSent} disabled={pending}>
               Tandai yang tampil sudah terkirim
@@ -231,13 +245,21 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
 
           <div className="flex flex-wrap items-center justify-between gap-3 text-[13px] text-muted">
             <span>
-              Menampilkan {number(shown.length)} dari {number(filtered.length)} undangan, {number(filteredPax)} orang
+              {number(from + 1)}–{number(from + shown.length)} dari {number(filtered.length)} undangan, {number(filteredPax)} orang
             </span>
-            {filtered.length > limit && (
-              <Button variant="ground" size="sm" onClick={() => setLimit(limit + PAGE)}>
-                Tampilkan {Math.min(PAGE, filtered.length - limit)} lagi
-              </Button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <SelectField
+                aria-label="Baris per halaman"
+                value={String(perPage)}
+                onValueChange={(v) => {
+                  setPerPage(Number(v));
+                  setPage(1);
+                }}
+                className="h-10 w-auto!"
+                options={PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} per halaman` }))}
+              />
+              {pages > 1 && <Pager page={current} pages={pages} onPage={setPage} />}
+            </div>
           </div>
         </>
       )}
@@ -251,6 +273,35 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
       />
       <ImportDialog open={importing} onClose={() => setImporting(false)} existingNames={existingNames} />
     </section>
+  );
+}
+
+/** Nomor halaman dengan elipsis: 1 … 4 5 6 … 20. */
+function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
+  const nums = [...new Set([1, page - 1, page, page + 1, pages])].filter((n) => n >= 1 && n <= pages).sort((a, b) => a - b);
+  const btn = "inline-flex h-10 min-w-10 items-center justify-center rounded-xl px-2 text-[13px] font-bold transition-colors duration-150";
+  return (
+    <nav aria-label="Halaman daftar tamu" className="flex items-center gap-1">
+      <button type="button" aria-label="Halaman sebelumnya" disabled={page === 1} onClick={() => onPage(page - 1)} className={cx(btn, "text-ink hover:bg-ground disabled:opacity-40")}>
+        <ChevronLeft size={16} aria-hidden="true" />
+      </button>
+      {nums.map((n, i) => (
+        <span key={n} className="flex items-center gap-1">
+          {i > 0 && n - nums[i - 1] > 1 && <span aria-hidden="true">…</span>}
+          <button
+            type="button"
+            aria-current={n === page ? "page" : undefined}
+            onClick={() => onPage(n)}
+            className={cx(btn, n === page ? "bg-ink text-white" : "text-ink hover:bg-ground")}
+          >
+            {n}
+          </button>
+        </span>
+      ))}
+      <button type="button" aria-label="Halaman berikutnya" disabled={page === pages} onClick={() => onPage(page + 1)} className={cx(btn, "text-ink hover:bg-ground disabled:opacity-40")}>
+        <ChevronRight size={16} aria-hidden="true" />
+      </button>
+    </nav>
   );
 }
 

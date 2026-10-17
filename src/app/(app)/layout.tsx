@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getContext, getSession } from "@/lib/session";
 import { can } from "@/lib/roles";
 import { Capsule, Sidebar, type NavId } from "@/components/nav";
+import { LiveRefresh } from "@/components/live-refresh";
 
 const ORDER: NavId[] = ["dashboard", "acara", "jadwal", "tamu", "budget", "catering", "vendor", "checklist", "seserahan", "moodboard", "dokumen", "pengaturan"];
 
@@ -23,6 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {children}
       </main>
       <Capsule items={items} saved={ctx.member.capsuleItems ?? null} />
+      <LiveRefresh />
     </div>
   );
 }

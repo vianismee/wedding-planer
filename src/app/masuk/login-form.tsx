@@ -13,7 +13,7 @@ function passwordError(code: string | undefined, status: number) {
   if (code?.startsWith("USER_ALREADY_EXISTS")) return "Email ini sudah terdaftar. Pilih Masuk, atau masuk dengan kode email.";
   if (code === "PASSWORD_TOO_SHORT") return "Kata sandi minimal 8 karakter.";
   if (code === "INVALID_EMAIL_OR_PASSWORD" || code === "CREDENTIAL_ACCOUNT_NOT_FOUND")
-    return "Email atau kata sandi salah. Akun yang dibuat lewat kode email belum punya kata sandi, jadi masuk dengan kode email.";
+    return "Email atau kata sandi salah. Lupa kata sandi? Minta pengelola Rukun meresetnya.";
   return "Gagal masuk. Periksa isian lalu coba lagi.";
 }
 
@@ -188,7 +188,10 @@ export function LoginForm({ next, google, initialRegister = false }: { next: str
               placeholder="nama@email.com"
             />
           </Field>
-          <Field label="Kata sandi" hint={register ? "Minimal 8 karakter." : undefined}>
+          <Field
+            label="Kata sandi"
+            hint={register ? "Minimal 8 karakter." : "Lupa kata sandi? Minta pengelola Rukun meresetnya, lalu ganti sendiri di Pengaturan."}
+          >
             <Input
               type="password"
               required

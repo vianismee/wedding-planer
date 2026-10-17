@@ -129,7 +129,7 @@ export function Sidebar({
   const signOut = useSignOut();
   const main = items.filter((i) => i !== "pengaturan");
   return (
-    <aside className="on-ink sticky top-4 hidden h-[calc(100dvh-32px)] w-[236px] shrink-0 flex-col gap-8 overflow-y-auto rounded-[28px] bg-ink px-[18px] pb-[18px] pt-7 min-[900px]:flex">
+    <aside className="on-ink sticky top-4 hidden h-[calc(100dvh-32px)] w-[236px] shrink-0 flex-col gap-8 overflow-y-auto rounded-[28px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-ink px-[18px] pb-[18px] pt-7 min-[900px]:flex">
       <Link
         href="/dashboard"
         className="flex items-center gap-2.5 px-2 text-white no-underline"

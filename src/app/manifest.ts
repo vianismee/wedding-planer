@@ -10,7 +10,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
+    // Ikuti putaran perangkat: tablet dipakai portrait maupun landscape.
+    orientation: "any",
     background_color: "#F2F1F6",
     theme_color: "#1C1B29",
     lang: "id",

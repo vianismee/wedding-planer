@@ -186,6 +186,26 @@ export async function chooseOffer(offerId: string, fd: FormData): Promise<Action
   });
 }
 
+/**
+ * Membatalkan pilihan: penawaran tetap ada di perbandingan, tetapi vendor terpesan dan
+ * termin DP/pelunasannya dihapus. Pengeluaran yang sudah dibayar tetap tercatat di Budget.
+ */
+export async function cancelOffer(offerId: string): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("vendor");
+    const [o] = await db
+      .update(schema.offer)
+      .set({ status: "dibandingkan" })
+      .where(and(eq(schema.offer.id, offerId), eq(schema.offer.weddingId, ctx.wedding.id)))
+      .returning();
+    if (!o) throw new UserError("Penawaran tidak ditemukan.");
+    // Termin ikut terhapus lewat cascade.
+    await db.delete(schema.vendor).where(and(eq(schema.vendor.offerId, o.id), eq(schema.vendor.weddingId, ctx.wedding.id)));
+    done();
+    return `Pesanan ${o.vendorName} dibatalkan. Penawarannya kembali ke daftar perbandingan.`;
+  });
+}
+
 /* ---------- Vendor terpesan ---------- */
 
 const vendorSchema = z.object({

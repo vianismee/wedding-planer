@@ -3,8 +3,8 @@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
 import { Check, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
-import { addOffer, chooseOffer, deleteOffer, trackCompare, updateOffer } from "@/actions/vendor";
-import { FormDialog, Modal, type ActionResult, submitWith } from "@/components/forms";
+import { addOffer, cancelOffer, chooseOffer, deleteOffer, trackCompare, updateOffer } from "@/actions/vendor";
+import { ActionButton, FormDialog, Modal, type ActionResult, submitWith } from "@/components/forms";
 import { useConfirm } from "@/components/confirm";
 import { Button, Field, Status, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
@@ -228,7 +228,19 @@ export function OfferCompare({
                 </dl>
                 <div className="mt-auto flex items-center gap-1 pt-1">
                   {isChosen ? (
-                    <span className="flex h-11 flex-1 items-center text-[13px] font-semibold text-muted">Sudah jadi vendor</span>
+                    <ActionButton
+                      variant="outline"
+                      className="flex-1"
+                      confirm={`Batalkan pesanan ${o.vendorName}? Vendor dan termin DP serta pelunasannya dihapus, penawarannya tetap ada. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
+                      confirmLabel="Batalkan pesanan"
+                      action={async () => {
+                        const r = await cancelOffer(o.id);
+                        if (r.ok) setSaved(null);
+                        return r;
+                      }}
+                    >
+                      Batalkan pesanan
+                    </ActionButton>
                   ) : (
                     <Button
                       variant={isPicked ? "outline" : "primary"}

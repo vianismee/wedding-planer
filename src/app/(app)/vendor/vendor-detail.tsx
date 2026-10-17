@@ -1,9 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Check, ChevronRight, Link2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronRight, Link2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { addTerm, deleteTerm, updateTerm } from "@/actions/budget";
-import { deleteVendor, setVendorShare, updateVendor } from "@/actions/vendor";
+import { cancelOffer, deleteVendor, setVendorShare, updateVendor } from "@/actions/vendor";
 import { ActionButton, Feedback, FormDialog, Modal, submitWith, type ActionResult } from "@/components/forms";
 import { CopyLink } from "@/components/copy-link";
 import { CreatableSelect } from "@/components/creatable-select";
@@ -245,18 +245,35 @@ export function VendorDetail({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4 min-[760px]:col-span-2">
-              <ActionButton
-                variant="danger"
-                confirm={`Hapus vendor ${v.name} beserta termin yang belum dibayar? Pengeluaran yang sudah tercatat tetap ada.`}
-                action={async () => {
-                  const r = await deleteVendor(v.id);
-                  if (r.ok) close();
-                  return r;
-                }}
-              >
-                <Trash2 size={14} aria-hidden="true" />
-                Hapus vendor
-              </ActionButton>
+              {v.offerId ? (
+                // Vendor dari penawaran: batalkan pesanan, penawarannya kembali ke perbandingan.
+                <ActionButton
+                  variant="danger"
+                  confirm={`Batalkan pesanan ${v.name}? Termin DP dan pelunasan dihapus, penawarannya kembali ke perbandingan. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
+                  confirmLabel="Batalkan pesanan"
+                  action={async () => {
+                    const r = await cancelOffer(v.offerId!);
+                    if (r.ok) close();
+                    return r;
+                  }}
+                >
+                  <X size={14} aria-hidden="true" />
+                  Batalkan pesanan
+                </ActionButton>
+              ) : (
+                <ActionButton
+                  variant="danger"
+                  confirm={`Hapus vendor ${v.name} beserta termin yang belum dibayar? Pengeluaran yang sudah tercatat tetap ada.`}
+                  action={async () => {
+                    const r = await deleteVendor(v.id);
+                    if (r.ok) close();
+                    return r;
+                  }}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Hapus vendor
+                </ActionButton>
+              )}
               <Button variant="ground" onClick={() => setEditing(true)}>
                 <Pencil size={14} aria-hidden="true" />
                 Ubah vendor

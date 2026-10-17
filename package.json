@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
+    "user:password": "tsx --env-file-if-exists=.env scripts/reset-password.ts",
     "worker": "tsx --env-file-if-exists=.env src/worker/index.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -6,7 +6,7 @@ import { MAX_MEMBERS, ROLE_HELP, ROLE_LABEL, type Role } from "@/lib/roles";
 import { ACCENTS, RELIGIONS, templateName } from "@/lib/templates";
 import { dateShort } from "@/lib/format";
 import { updateWedding } from "@/actions/wedding";
-import { createInvite, removeMember, revokeInvite, updateProfile } from "@/actions/anggota";
+import { createInvite, removeMember, revokeInvite, setPassword, updateProfile } from "@/actions/anggota";
 import { ActionButton, ActionForm } from "@/components/forms";
 import { Avatar, Card, Field, Input, LinkButton, PageHeader, SectionTitle, Status } from "@/components/kit";
 import { DateField } from "@/components/date-field";
@@ -185,6 +185,22 @@ export default async function PengaturanPage() {
               </Field>
             </ActionForm>
             <p className="text-[13px] text-muted">Masuk dengan {ctx.user.email}.</p>
+            <div className="flex flex-col gap-3 border-t border-ground pt-4">
+              <h3 className="text-[14px] font-bold">Kata sandi</h3>
+              <p className="text-[13px] text-muted">
+                Buat atau ganti kata sandi untuk masuk dengan email dan kata sandi. Perangkat lain yang masih masuk akan dikeluarkan.
+              </p>
+              <ActionForm action={setPassword} submitLabel="Simpan kata sandi" submitVariant="ground" resetOnSuccess>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Kata sandi baru" hint="Minimal 8 karakter.">
+                    <Input type="password" name="password" required minLength={8} maxLength={128} autoComplete="new-password" />
+                  </Field>
+                  <Field label="Ulangi kata sandi baru">
+                    <Input type="password" name="confirm" required minLength={8} maxLength={128} autoComplete="new-password" />
+                  </Field>
+                </div>
+              </ActionForm>
+            </div>
             <WeddingSwitcher current={w.id} weddings={myWeddings.map((x) => ({ id: x.id, name: `${x.groom} & ${x.bride}` }))} />
             <LinkButton href="/onboarding?baru=1" variant="ground" className="self-start">
               Buat ruang pernikahan lain
