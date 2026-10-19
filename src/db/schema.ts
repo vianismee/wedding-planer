@@ -458,9 +458,12 @@ export const cateringPlan = pgTable(
 
 export type MoodNode = {
   id: string;
-  type: "photo" | "note" | "palette";
+  type: "photo" | "note" | "palette" | "text" | "shape" | "draw";
   x: number;
   y: number;
+  // Ukuran bebas setelah di-resize. Kosong = ukuran bawaan tipe kartu.
+  w?: number;
+  h?: number;
   title: string;
   text?: string;
   fileId?: string;
@@ -469,6 +472,21 @@ export type MoodNode = {
   focus?: { x: number; y: number };
   swatches?: string[];
   tags: string[];
+  // Teks bebas di kanvas.
+  font?: string;
+  fontSize?: number;
+  weight?: 400 | 700;
+  align?: "left" | "center" | "right";
+  // Warna teks, garis bentuk, atau tinta pena.
+  color?: string;
+  // Bentuk: garis dan panah memakai `points` (x1 y1 x2 y2).
+  shape?: "rect" | "ellipse" | "line" | "arrow";
+  fill?: string;
+  strokeWidth?: number;
+  // Goresan pena dan garis: titik dalam kotak vw x vh, ditarik mengikuti w x h saat di-resize.
+  points?: number[];
+  vw?: number;
+  vh?: number;
 };
 export type MoodEdge = { id: string; from: string; to: string; label: string };
 export type MoodGroup = { id: string; x: number; y: number; w: number; h: number; title: string; color: string };
@@ -486,6 +504,7 @@ export const moodboard = pgTable(
     rev: integer("rev").notNull().default(0),
     updatedBy: text("updated_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    shareToken: text("share_token").unique(), // link baca-saja untuk vendor
   },
   (t) => [uniqueIndex("moodboard_wedding_board_idx").on(t.weddingId, t.board)],
 );

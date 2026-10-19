@@ -130,6 +130,10 @@ select:focus,
 input[cmdk-input]:focus {
   box-shadow: none !important;
 }
+/* Teks yang sedang diketik di kanvas moodboard: bingkai elemen terpilih sudah jadi tanda fokusnya. */
+textarea[data-canvas-text]:focus {
+  box-shadow: none !important;
+}
 /* Isian di dalam color picker sudah dibingkai label: tanda fokus pindah ke bingkainya. */
 input[data-color-picker-input]:focus {
   box-shadow: none !important;

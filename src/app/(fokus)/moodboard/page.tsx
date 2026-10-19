@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
 import { MOOD_BOARDS, type MoodBoardId } from "@/lib/moodboard";
 import { LinkButton } from "@/components/kit";
+import { moodFontVars } from "@/lib/mood-fonts";
 import { MoodboardCanvas } from "./canvas";
 
 export const metadata: Metadata = { title: "Moodboard" };
@@ -14,10 +15,12 @@ export default async function MoodboardPage() {
 
   const data = {} as Record<MoodBoardId, schema.MoodData>;
   const rev = {} as Record<MoodBoardId, number>;
+  const share = {} as Record<MoodBoardId, string | null>;
   for (const b of MOOD_BOARDS) {
     const row = rows.find((r) => r.board === b.id);
     data[b.id] = row?.data ?? { nodes: [], edges: [], groups: [] };
     rev[b.id] = row?.rev ?? 0;
+    share[b.id] = row?.shareToken ?? null;
   }
 
   return (
@@ -32,8 +35,8 @@ export default async function MoodboardPage() {
           Kembali ke beranda
         </LinkButton>
       </section>
-      <div className="hidden h-[calc(100dvh-24px)] min-h-[520px] min-[768px]:block">
-        <MoodboardCanvas initial={data} initialRev={rev} />
+      <div className={`hidden h-[calc(100dvh-24px)] min-h-[520px] min-[768px]:block ${moodFontVars}`}>
+        <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} />
       </div>
     </>
   );

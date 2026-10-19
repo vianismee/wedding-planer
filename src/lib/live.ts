@@ -15,3 +15,13 @@ export function subscribe(weddingId: string, fn: () => void) {
   live.on(weddingId, fn);
   return () => void live.off(weddingId, fn);
 }
+
+/** Kanal berisi data (bukan sekadar sinyal), misalnya operasi dan kursor moodboard. */
+export function publishRoom(room: string, payload: unknown) {
+  live.emit(`room:${room}`, payload);
+}
+
+export function subscribeRoom(room: string, fn: (payload: unknown) => void) {
+  live.on(`room:${room}`, fn);
+  return () => void live.off(`room:${room}`, fn);
+}
