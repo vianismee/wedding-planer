@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight, Bold, Maximize2 } from "lucide-react";
 import type { MoodNode } from "@/db/schema";
 import { MOOD_FILLS, MOOD_FONTS, MOOD_INK, type MoodFont } from "@/lib/moodboard";
@@ -12,12 +12,98 @@ type Patch = (p: Partial<MoodNode>) => void;
 
 export function PanelHead({ label, onDone }: { label: string; onDone: () => void }) {
   return (
-    <div className="flex items-center justify-between">
-      <h2 className="text-[13px] font-bold text-muted">{label}</h2>
-      <button type="button" onClick={onDone} className="h-10 rounded-lg bg-ground px-3 text-[12px] font-bold hover:bg-[#e8e7ef]">
+    <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line px-4">
+      <h2 className="truncate text-[14px] font-extrabold">{label}</h2>
+      <button type="button" onClick={onDone} className="h-9 shrink-0 rounded-lg px-2.5 text-[12px] font-bold text-muted hover:bg-ground hover:text-ink">
         Selesai
       </button>
     </div>
+  );
+}
+
+/** Satu bagian panel kanan. Jarak antar-bagian lebih besar dari jarak di dalamnya, dipisah garis tipis. */
+export function Section({ title, children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3 border-b border-line px-4 py-4 last:border-b-0">
+      {title && <h3 className="text-[12px] font-bold text-muted">{title}</h3>}
+      {children}
+    </section>
+  );
+}
+
+/**
+ * Isian angka ringkas (X, Y, Lebar, Tinggi). Disimpan saat Enter atau pindah fokus, supaya angka
+ * yang belum selesai diketik tidak langsung menggeser elemen. Panah atas dan bawah mengubah 1
+ * (Shift: 10) dan langsung disimpan.
+ */
+export function NumField({ short, label, value, onChange, disabled }: { short: string; label: string; value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const v = Number(draft.replace(",", "."));
+    setDraft(null);
+    if (draft.trim() && Number.isFinite(v)) onChange(Math.round(v));
+  };
+  return (
+    <label
+      title={label}
+      className={cx(
+        "flex h-10 min-w-0 items-center gap-1.5 rounded-[10px] border border-transparent bg-ground px-2.5 focus-within:border-ink",
+        disabled ? "text-muted" : "hover:border-outline",
+      )}
+    >
+      <span className="w-3.5 shrink-0 text-[12px] font-bold text-muted" aria-hidden="true">
+        {short}
+      </span>
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label={label}
+        disabled={disabled}
+        value={draft ?? String(Math.round(value))}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          else if (e.key === "Escape") setDraft(null);
+          else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            setDraft(null);
+            onChange(Math.round(value) + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
+          }
+        }}
+        className="h-full min-w-0 flex-1 bg-transparent text-[13px] font-semibold tabular outline-none"
+      />
+    </label>
+  );
+}
+
+type Rect = { x: number; y: number; w: number; h: number };
+/** Posisi dan ukuran elemen atau kelompok. `lock` mengunci tinggi (teks mengikuti isi, kartu media mengikuti rasio). */
+export function GeometryFields({ r, onChange, lockH, lockWH }: { r: Rect; onChange: (p: Partial<Rect>) => void; lockH?: boolean; lockWH?: boolean }) {
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      <NumField short="X" label="Posisi X" value={r.x} onChange={(x) => onChange({ x })} />
+      <NumField short="Y" label="Posisi Y" value={r.y} onChange={(y) => onChange({ y })} />
+      <NumField short="L" label="Lebar" value={r.w} disabled={lockWH} onChange={(w) => onChange({ w })} />
+      <NumField short="T" label={lockH ? "Tinggi (mengikuti isi atau rasio)" : "Tinggi"} value={r.h} disabled={lockH || lockWH} onChange={(h) => onChange({ h })} />
+    </div>
+  );
+}
+
+/** Tombol ikon kecil berlabel untuk deretan aksi di panel (urutan lapisan, perataan). */
+export function IconAction({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-10 flex-1 items-center justify-center rounded-[10px] hover:bg-surface disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -244,7 +330,7 @@ export function ToolOptions({ tool, closedShape, style, onChange }: { tool: stri
       role="toolbar"
       aria-label="Pengaturan alat"
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute left-1/2 top-3 flex max-w-[calc(100%-200px)] -translate-x-1/2 flex-wrap items-center gap-1 rounded-2xl border border-line bg-surface p-1 shadow-bar"
+      className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border border-line bg-surface p-1 shadow-bar"
     >
       {MOOD_INK.map((c) => (
         <Swatch key={c} color={c} on={style.color === c} onClick={() => onChange({ color: c })} />

@@ -20,7 +20,7 @@ const boardName = (id: string) => MOOD_BOARDS.find((b) => b.id === id)?.name ?? 
 /**
  * Kursor anggota lain di papan yang sama: panah berwarna dengan nama tepat di bawahnya. Digambar di
  * koordinat layar supaya ukurannya tetap, dan bergerak halus karena kursor dikirim paling cepat
- * tiap 50 ms. Muncul dengan animasi singkat saat anggota masuk ke papan.
+ * tiap 50 ms.
  */
 export function Cursors({ peers, view }: { peers: MoodPresence[]; view: View }) {
   return (
@@ -32,7 +32,7 @@ export function Cursors({ peers, view }: { peers: MoodPresence[]; view: View }) 
             className="absolute left-0 top-0 transition-transform duration-75 ease-linear"
             style={{ transform: `translate(${view.pan.x + p.cursor.x * view.zoom}px, ${view.pan.y + p.cursor.y * view.zoom}px)` }}
           >
-            <div className="flex origin-top-left flex-col items-start animate-in fade-in zoom-in-50 duration-200">
+            <div className="flex flex-col items-start">
               <svg width="22" height="24" viewBox="0 0 18 20" className="-ml-[2px] -mt-[2px] block drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.25)]">
                 <path d="M1.5 1.5 L16 10.2 L9.4 11.6 L6 18.2 Z" fill={p.color} stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
               </svg>

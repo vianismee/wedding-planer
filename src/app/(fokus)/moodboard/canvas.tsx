@@ -3,8 +3,20 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent } from "react";
 import Link from "next/link";
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  ArrowDown,
+  ArrowUp,
   ArrowUpRight,
   ChevronLeft,
+  ChevronsDown,
+  ChevronsUp,
+  Copy,
+  Group,
   Circle,
   Eraser,
   ExternalLink,
@@ -15,6 +27,7 @@ import {
   MousePointer2,
   NotebookPen,
   Palette,
+  PanelLeft,
   PenLine,
   Plus,
   Redo2,
@@ -25,7 +38,7 @@ import {
   SquareDashed,
   Type,
   Undo2,
-  Upload,
+  Ungroup,
 } from "lucide-react";
 import type { MoodData, MoodEdge, MoodGroup, MoodMedia, MoodNode } from "@/db/schema";
 import { setMoodboardShare } from "@/actions/moodboard";
@@ -72,10 +85,12 @@ import {
   textStyle,
 } from "./board-view";
 import { useMoodSync } from "./use-mood-sync";
+import { useNoPageZoom } from "./no-page-zoom";
 import { record, step, type History } from "./history";
 import { polyDist, simplify, toLocal } from "./ink";
 import { Cursors, firstName, PeerAvatars, PeerSelections } from "./presence";
-import { DangerButton, Help, PanelHead, PhotoAdjust, StrokePanel, TextField, TextPanel, ToolOptions, type InkStyle } from "./panels";
+import { DangerButton, GeometryFields, Help, IconAction, PanelHead, PhotoAdjust, Section, StrokePanel, TextField, TextPanel, ToolOptions, type InkStyle } from "./panels";
+import { groupOwners, LayersPanel } from "./layers";
 
 type Tool = "select" | "hand" | "link" | "pen" | "eraser" | "shape" | "text";
 type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
@@ -107,8 +122,8 @@ const MAX_PHOTO = 10 * 1024 * 1024;
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 3;
 const PAN0 = { x: 96, y: 24 };
-// Lebar toolbar alat di kiri kanvas: area kerja dihitung dari sini supaya kartu tidak tertutup.
-const LEFT = 84;
+// Tinggi toolbar alat di bawah kanvas (dengan jaraknya): area kerja dihitung tanpa bagian ini supaya kartu tidak tertutup.
+const BOTTOM = 80;
 const MIN_SIZE: Record<string, { w: number; h: number }> = {
   photo: { w: 140, h: 140 },
   note: { w: 140, h: 90 },
@@ -162,6 +177,8 @@ function cursorCss(color: string) {
 }
 const r1 = (v: number) => Math.round(v);
 function nodeLabel(n: MoodNode) {
+  // Nama dari panel Layer berlaku untuk semua jenis; tanpa nama, dipakai label bawaan per jenis.
+  if (n.title && !isCard(n)) return n.title;
   if (n.type === "draw") return "Goresan pena";
   if (n.type === "shape") return SHAPES.find((s) => s.k === n.shape)?.name ?? "Bentuk";
   if (n.type === "text") return (n.text ?? "").split("\n")[0].slice(0, 40) || "Teks kosong";
@@ -214,6 +231,7 @@ export function MoodboardCanvas({
   const [uploads, setUploads] = useState<Record<string, Upload>>({});
   const [imports, setImports] = useState<Record<string, Pending>>({});
   const [linkOpen, setLinkOpen] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(true);
   const [linkUrl, setLinkUrl] = useState("");
   const [spaceDown, setSpaceDown] = useState(false);
   const [linkTarget, setLinkTarget] = useState("");
@@ -267,6 +285,11 @@ export function MoodboardCanvas({
   const selGroup = sel?.kind === "group" ? b.groups.find((x) => x.id === selIds[0]) : undefined;
   const boardName = MOOD_BOARDS.find((x) => x.id === active)!.name;
   const followed = following ? sync.peers[following] : undefined;
+  const owners = groupOwners(b, box);
+  // Yang tersembunyi dari panel Layer tidak digambar di kanvas; yang terkunci tidak bisa dipilih atau digeser di kanvas.
+  const shownNodes = b.nodes.filter((n) => !n.hidden);
+  const shownIds = new Set(shownNodes.map((n) => n.id));
+  const pickable = (n: MoodNode) => !n.hidden && !n.locked;
 
   /* ---------- Menyimpan perubahan ---------- */
 
@@ -329,8 +352,131 @@ export function MoodboardCanvas({
     commit(copies.map((item) => ({ t: "put", c: "nodes", item })));
     setSel({ kind: "node", ids: copies.map((c) => c.id) });
   }
-  function bringToFront() {
-    commit(selIds.map((id) => ({ t: "front", id })));
+  /**
+   * Pindah lapisan elemen terpilih: paling depan, maju satu, mundur satu, atau paling belakang.
+   * Urutan sesama elemen terpilih tetap; elemen yang sudah di ujung tidak bergerak.
+   */
+  function restack(dir: "front" | "forward" | "backward" | "back") {
+    const order = boardsRef.current[active].nodes.map((n) => n.id);
+    const chosen = new Set(selIds);
+    const up = dir === "front" || dir === "forward";
+    const ids = order.filter((id) => chosen.has(id));
+    if (up) ids.reverse();
+    const ops: MoodOp[] = [];
+    let edge = up ? order.length - 1 : 0;
+    for (const id of ids) {
+      const i = order.indexOf(id);
+      let j = dir === "front" || dir === "back" ? edge : i + (up ? 1 : -1);
+      if (dir === "forward" || dir === "backward") {
+        if (j < 0 || j >= order.length || chosen.has(order[j])) continue;
+      }
+      edge += up ? -1 : 1;
+      if (j === i) continue;
+      j = Math.max(0, Math.min(order.length - 1, j));
+      order.splice(i, 1);
+      order.splice(j, 0, id);
+      ops.push({ t: "z", id, to: j });
+    }
+    commit(ops);
+  }
+
+  /** Taruh elemen tepat di atas atau di bawah elemen lain (seret di panel Layer). */
+  function reorderLayer(id: string, target: string, above: boolean) {
+    const rest = boardsRef.current[active].nodes.filter((n) => n.id !== id);
+    const i = rest.findIndex((n) => n.id === target);
+    if (i >= 0) commit([{ t: "z", id, to: above ? i + 1 : i }]);
+  }
+
+  /** Kelompokkan elemen terpilih: kelompok baru dibuat pas mengelilinginya, dengan ruang untuk nama di atas. */
+  function groupSelection() {
+    if (sel?.kind !== "node" || !selNodes.length) return flash("Pilih elemen yang mau dikelompokkan dulu.");
+    if (raw.groups.length >= MOOD_LIMITS.groups) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.groups} kelompok.`);
+    const rs = selNodes.map(box);
+    const x0 = Math.min(...rs.map((r) => r.x)) - 24;
+    const y0 = Math.min(...rs.map((r) => r.y)) - 52;
+    const x1 = Math.max(...rs.map((r) => r.x + r.w)) + 24;
+    const y1 = Math.max(...rs.map((r) => r.y + r.h)) + 24;
+    const g: MoodGroup = { id: uid(), title: "Kelompok baru", color: "netral", x: r1(x0), y: r1(y0), w: Math.max(MIN_SIZE.group.w, r1(x1 - x0)), h: Math.max(MIN_SIZE.group.h, r1(y1 - y0)) };
+    commit([{ t: "put", c: "groups", item: g }]);
+    setSel({ kind: "group", ids: [g.id] });
+  }
+
+  /** Lepas kelompok: kotaknya dihapus, isinya tetap di tempat dan langsung terpilih. */
+  function ungroup(ids: string[]) {
+    if (!ids.length) return;
+    const kids = b.nodes.filter((n) => ids.includes(owners.get(n.id) ?? "")).map((n) => n.id);
+    commit(ids.map((id) => ({ t: "del", c: "groups", id })));
+    setSel(kids.length ? { kind: "node", ids: kids } : null);
+  }
+
+  function toggleLayer(kind: "node" | "group", id: string, key: "locked" | "hidden") {
+    const d = boardsRef.current[active];
+    const item = kind === "node" ? d.nodes.find((x) => x.id === id) : d.groups.find((x) => x.id === id);
+    if (!item) return;
+    commit([{ t: "patch", c: kind === "node" ? "nodes" : "groups", id, set: toSet({ [key]: item[key] ? undefined : true }) }]);
+  }
+
+  function selectLayer(kind: "node" | "group", id: string, additive: boolean) {
+    setFollowing(null);
+    setEditing(null);
+    if (additive && sel?.kind === kind) setSel({ kind, ids: sel.ids.includes(id) ? sel.ids.filter((x) => x !== id) : [...sel.ids, id] });
+    else setSel({ kind, ids: [id] });
+    // Geser tampilan hanya bila elemen di luar layar, supaya memilih dari daftar tidak membuat kanvas melompat.
+    const r = boxById(id);
+    const v = viewSize();
+    if (r && (r.x * zoom + pan.x > v.w || (r.x + r.w) * zoom + pan.x < 0 || r.y * zoom + pan.y > v.h - BOTTOM || (r.y + r.h) * zoom + pan.y < 0)) reveal(r);
+  }
+
+  /** Ratakan elemen terpilih ke tepi atau tengah kotak gabungannya. */
+  function alignSelected(how: "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom") {
+    const rs = selNodes.map((n) => ({ n, r: box(n) }));
+    const x0 = Math.min(...rs.map(({ r }) => r.x));
+    const x1 = Math.max(...rs.map(({ r }) => r.x + r.w));
+    const y0 = Math.min(...rs.map(({ r }) => r.y));
+    const y1 = Math.max(...rs.map(({ r }) => r.y + r.h));
+    const ops: MoodOp[] = [];
+    for (const { n, r } of rs) {
+      if (n.locked) continue;
+      const set =
+        how === "left"
+          ? { x: x0 }
+          : how === "right"
+            ? { x: x1 - r.w }
+            : how === "hcenter"
+              ? { x: r1((x0 + x1) / 2 - r.w / 2) }
+              : how === "top"
+                ? { y: y0 }
+                : how === "bottom"
+                  ? { y: y1 - r.h }
+                  : { y: r1((y0 + y1) / 2 - r.h / 2) };
+      ops.push({ t: "patch", c: "nodes", id: n.id, set });
+    }
+    commit(ops);
+  }
+
+  /** X, Y, lebar, tinggi dari panel kanan. Kartu media menjaga rasio foto, teks menjaga tinggi isinya. */
+  function setGeometry(n: MoodNode, p: Partial<MoodRect>) {
+    const min = MIN_SIZE[n.type] ?? MIN_SIZE.shape;
+    const next: Partial<MoodNode> = {};
+    if (p.x !== undefined) next.x = p.x;
+    if (p.y !== undefined) next.y = p.y;
+    if (p.w !== undefined) next.w = Math.max(min.w, p.w);
+    if (p.h !== undefined && n.type !== "text") next.h = Math.max(min.h, p.h);
+    if (n.type === "media" && next.w !== undefined) next.h = Math.round(next.w * mediaRatio(n)) + MEDIA_FOOTER;
+    // Gambar dan bentuk tanpa ukuran tersimpan memakai ukuran kotaknya, jadi tinggi atau lebar yang tidak diubah ikut ditulis.
+    if ((next.w !== undefined || next.h !== undefined) && n.type !== "text") {
+      const r = box(n);
+      next.w ??= r.w;
+      next.h ??= r.h;
+    }
+    patchNode(n.id, next, `geo:${n.id}:${Object.keys(p).join()}`);
+  }
+  function setGroupGeometry(g: MoodGroup, p: Partial<MoodRect>) {
+    patchGroup(
+      g.id,
+      { ...p, ...(p.w !== undefined && { w: Math.max(MIN_SIZE.group.w, p.w) }), ...(p.h !== undefined && { h: Math.max(MIN_SIZE.group.h, p.h) }) },
+      `geo:${g.id}:${Object.keys(p).join()}`,
+    );
   }
 
   function connect(from: string, to: string) {
@@ -356,7 +502,7 @@ export function MoodboardCanvas({
   /** Titik tengah area kerja (di kanan toolbar) dalam koordinat papan. */
   function center(w = 240, h = 200) {
     const v = viewSize();
-    return { x: r1((LEFT + (v.w - LEFT) / 2 - pan.x) / zoom - w / 2), y: r1((v.h / 2 - pan.y) / zoom - h / 2) };
+    return { x: r1((v.w / 2 - pan.x) / zoom - w / 2), y: r1(((v.h - BOTTOM) / 2 - pan.y) / zoom - h / 2) };
   }
   /** Tempat kosong terdekat dari tengah layar, supaya kartu baru tidak menumpuk di atas kartu lain. */
   function freeSpot(w: number, h: number) {
@@ -387,9 +533,9 @@ export function MoodboardCanvas({
   /** Tampilkan kotak `r` di tengah area kerja. `pad` memberi jarak tepi (untuk Paskan), tanpa jarak untuk mengikuti anggota. */
   function showRect(r: MoodRect, maxZoom = 1.2, pad = true) {
     const v = viewSize();
-    const z = Math.max(ZOOM_MIN, Math.min(maxZoom, Math.min((v.w - LEFT - (pad ? 48 : 0)) / r.w, (v.h - (pad ? 64 : 0)) / r.h)));
+    const z = Math.max(ZOOM_MIN, Math.min(maxZoom, Math.min((v.w - (pad ? 48 : 0)) / r.w, (v.h - BOTTOM - (pad ? 48 : 0)) / r.h)));
     setZoom(z);
-    setPan({ x: LEFT + (v.w - LEFT) / 2 - (r.x + r.w / 2) * z, y: v.h / 2 - (r.y + r.h / 2) * z });
+    setPan({ x: v.w / 2 - (r.x + r.w / 2) * z, y: (v.h - BOTTOM) / 2 - (r.y + r.h / 2) * z });
   }
   function fit(d: MoodData = b) {
     const r = contentBounds(d, box);
@@ -400,11 +546,10 @@ export function MoodboardCanvas({
     }
     showRect(r);
   }
-  /** Geser tampilan supaya elemen terlihat (dipakai dari daftar elemen). */
-  function reveal(n: MoodNode) {
+  /** Geser tampilan supaya kotak `r` ada di tengah area kerja (dipakai dari panel Layer). */
+  function reveal(r: MoodRect) {
     const v = viewSize();
-    const r = box(n);
-    setPan({ x: LEFT + (v.w - LEFT) / 2 - (r.x + r.w / 2) * zoom, y: v.h / 2 - (r.y + r.h / 2) * zoom });
+    setPan({ x: v.w / 2 - (r.x + r.w / 2) * zoom, y: (v.h - BOTTOM) / 2 - (r.y + r.h / 2) * zoom });
   }
   function pickBoard(id: MoodBoardId, doFit = true) {
     setActive(id);
@@ -417,20 +562,32 @@ export function MoodboardCanvas({
     if (doFit) fit(boards[id]);
   }
 
+  useNoPageZoom(boardRef, (f, cx2, cy2) => {
+    const r = boardRef.current!.getBoundingClientRect();
+    setFollowing(null);
+    zoomAt(f === null ? 1 : zoom * f, cx2 - r.left, cy2 - r.top);
+  });
+
   // Saat halaman dibuka, paskan tampilan ke isi papan supaya tidak ada kartu yang terpotong di layar sempit.
+  // Di layar di bawah 1280px panel Layer mulai tertutup supaya kanvas tetap lega.
   const fitted = useRef(false);
   useEffect(() => {
     if (fitted.current) return;
     fitted.current = true;
     fit();
   });
+  useEffect(() => {
+    // Lebar layar baru diketahui di browser, jadi disamakan setelah render pertama.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (window.innerWidth < 1280) setLayersOpen(false);
+  }, []);
 
   /* ---------- Kehadiran: kirim tampilan, pilihan, ikuti anggota ---------- */
 
   useEffect(() => {
     const r = boardRef.current?.getBoundingClientRect();
     if (!r) return;
-    presence({ board: active, view: { x: (LEFT - pan.x) / zoom, y: -pan.y / zoom, w: (r.width - LEFT) / zoom, h: r.height / zoom } });
+    presence({ board: active, view: { x: -pan.x / zoom, y: -pan.y / zoom, w: r.width / zoom, h: (r.height - BOTTOM) / zoom } });
   }, [active, pan, zoom, presence]);
   useEffect(() => {
     presence({ board: active, sel: sel?.kind === "node" || sel?.kind === "group" ? sel.ids : [] });
@@ -657,8 +814,8 @@ export function MoodboardCanvas({
       const g = b.groups.find((x) => x.id === id);
       if (!g) continue;
       groups[id] = { x: g.x, y: g.y };
-      // Elemen di dalam kelompok ikut berpindah.
-      for (const n of b.nodes) if (insideRect(box(n), g)) nodes[n.id] = { x: n.x, y: n.y };
+      // Elemen di dalam kelompok ikut berpindah, kecuali yang terkunci.
+      for (const n of b.nodes) if (!n.locked && insideRect(box(n), g)) nodes[n.id] = { x: n.x, y: n.y };
     }
     startDrag(e, { kind: "move", x0: p.x, y0: p.y, nodes, groups, moved: false });
   }
@@ -667,8 +824,8 @@ export function MoodboardCanvas({
     // Titik sambung di sisi elemen: tarik untuk menyambung, bukan untuk menggeser.
     const viaHandle = (e.target as HTMLElement).dataset?.linkHandle !== undefined;
     if ((e.button !== 0 && e.button !== 1) || drag.current?.kind === "pinch") return;
-    // Alat gambar dan geser bekerja di atas elemen juga: biarkan kanvas yang menangani.
-    if (panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "text" && n.type !== "text")) return;
+    // Alat gambar dan geser bekerja di atas elemen juga: biarkan kanvas yang menangani. Elemen terkunci juga.
+    if (n.locked || panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "text" && n.type !== "text")) return;
     e.stopPropagation();
     if (editing === n.id) return;
     boardRef.current?.focus({ preventScroll: true });
@@ -709,7 +866,7 @@ export function MoodboardCanvas({
 
   function onGroupDown(e: ReactPointerEvent, g: MoodGroup) {
     if ((e.button !== 0 && e.button !== 1) || drag.current?.kind === "pinch") return;
-    if (panning(e) || tool !== "select") return;
+    if (g.locked || panning(e) || tool !== "select") return;
     e.stopPropagation();
     boardRef.current?.focus({ preventScroll: true });
     if (editing) setEditing(null);
@@ -727,7 +884,7 @@ export function MoodboardCanvas({
 
   function eraseAt(x: number, y: number) {
     const hit = b.nodes.filter((n) => {
-      if (n.type !== "draw" || erasing.includes(n.id)) return false;
+      if (n.type !== "draw" || !pickable(n) || erasing.includes(n.id)) return false;
       const r = box(n);
       const tol = 8 / zoom + (n.strokeWidth ?? 3) / 2;
       if (x < r.x - tol || x > r.x + r.w + tol || y < r.y - tol || y > r.y + r.h + tol) return false;
@@ -816,7 +973,7 @@ export function MoodboardCanvas({
     else if (d.kind === "marquee") {
       const r = { x: Math.min(d.x0, p.x), y: Math.min(d.y0, p.y), w: Math.abs(p.x - d.x0), h: Math.abs(p.y - d.y0) };
       setDraft({ kind: "marquee", r });
-      const hit = b.nodes.filter((n) => overlaps(r, box(n))).map((n) => n.id);
+      const hit = b.nodes.filter((n) => pickable(n) && overlaps(r, box(n))).map((n) => n.id);
       const ids = [...new Set([...d.base, ...hit])];
       setSel(ids.length ? { kind: "node", ids } : null);
     } else if (d.kind === "pen") {
@@ -862,7 +1019,7 @@ export function MoodboardCanvas({
       else patchNode(d.id, current(d.id)?.type === "text" ? { x: r.x, w: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h });
     } else if (d.kind === "link") {
       const hit = [...b.nodes].reverse().find((n) => {
-        if (isStroke(n)) return false;
+        if (isStroke(n) || n.hidden) return false;
         const r = box(n);
         return p.x >= r.x - 10 && p.x <= r.x + r.w + 10 && p.y >= r.y - 10 && p.y <= r.y + r.h + 10;
       });
@@ -935,9 +1092,21 @@ export function MoodboardCanvas({
       e.preventDefault();
       return duplicateSelection();
     }
+    if (mod && (k === "g" || k === "G")) {
+      e.preventDefault();
+      if (e.shiftKey) return ungroup(sel?.kind === "group" ? sel.ids : []);
+      return groupSelection();
+    }
+    // Shift mengubah ] dan [ menjadi } dan { di keyboard US.
+    if (mod && "[]{}".includes(k) && k.length === 1 && sel?.kind === "node") {
+      e.preventDefault();
+      const up = k === "]" || k === "}";
+      return restack(up ? (e.shiftKey ? "front" : "forward") : e.shiftKey ? "back" : "backward");
+    }
     if (mod && (k === "a" || k === "A") && onCanvas) {
       e.preventDefault();
-      return setSel(b.nodes.length ? { kind: "node", ids: b.nodes.map((n) => n.id) } : null);
+      const all = b.nodes.filter(pickable).map((n) => n.id);
+      return setSel(all.length ? { kind: "node", ids: all } : null);
     }
     if (mod || e.altKey) return;
     const stepPx = e.shiftKey ? 1 : 10;
@@ -972,7 +1141,7 @@ export function MoodboardCanvas({
       }
       for (const id of moved) {
         const n = d.nodes.find((x) => x.id === id);
-        if (n) ops.push({ t: "patch", c: "nodes", id, set: { x: n.x + dx, y: n.y + dy } });
+        if (n && !n.locked) ops.push({ t: "patch", c: "nodes", id, set: { x: n.x + dx, y: n.y + dy } });
       }
       commit(ops, `nudge:${sel.ids.join()}`);
     } else {
@@ -1094,7 +1263,8 @@ export function MoodboardCanvas({
   const shareUrl = share[active] && typeof window !== "undefined" ? `${window.location.origin}/m/${share[active]}` : "";
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[22px] bg-surface">
+    // touch-manipulation: ketuk dua kali di toolbar atau panel tidak memperbesar halaman di iPad.
+    <div className="flex h-full min-h-0 touch-manipulation flex-col overflow-hidden rounded-[22px] bg-surface">
       {/* Bar atas */}
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-2.5">
         <Link
@@ -1105,6 +1275,16 @@ export function MoodboardCanvas({
           Dashboard
         </Link>
         <span className="h-6 w-px bg-line" aria-hidden="true" />
+        <button
+          type="button"
+          aria-pressed={layersOpen}
+          aria-label="Panel Layer"
+          title={layersOpen ? "Sembunyikan panel Layer" : "Tampilkan panel Layer"}
+          onClick={() => setLayersOpen((o) => !o)}
+          className={cx("flex size-11 items-center justify-center rounded-xl transition-colors duration-150", layersOpen ? "bg-ground" : "hover:bg-ground")}
+        >
+          <PanelLeft size={18} aria-hidden="true" />
+        </button>
         <h1 className="text-[20px] font-extrabold tracking-[-0.02em]">Moodboard</h1>
         <div role="group" aria-label="Papan" className="flex gap-1 rounded-xl bg-ground p-1">
           {MOOD_BOARDS.map((x) => {
@@ -1187,23 +1367,56 @@ export function MoodboardCanvas({
           <Share2 size={16} aria-hidden="true" />
           Bagikan
         </button>
-        <label className="relative inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl bg-ink px-4 text-[13px] font-bold text-white focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-[#2e2d40]">
-          <Upload size={16} aria-hidden="true" />
-          Unggah foto
-          <input
-            type="file"
-            accept={PHOTO_MIME.join(",")}
-            multiple
-            className="sr-only"
-            onChange={(e) => {
-              addPhotos(e.target.files);
-              e.target.value = "";
-            }}
-          />
-        </label>
       </header>
 
       <div className="flex min-h-0 flex-1">
+        {layersOpen && (
+          <aside aria-label="Layer" className="flex w-[240px] shrink-0 flex-col border-r border-line">
+            <div className="flex min-h-14 items-center justify-between gap-2 border-b border-line pl-4 pr-2">
+              <h2 className="text-[14px] font-extrabold">Layer</h2>
+              <div className="flex gap-0.5">
+                <button
+                  type="button"
+                  aria-label="Kelompokkan pilihan (Ctrl+G)"
+                  title="Kelompokkan pilihan (Ctrl+G)"
+                  disabled={sel?.kind !== "node"}
+                  onClick={groupSelection}
+                  className="flex size-10 items-center justify-center rounded-lg hover:bg-ground disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
+                >
+                  <Group size={16} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Lepas kelompok (Ctrl+Shift+G)"
+                  title="Lepas kelompok (Ctrl+Shift+G)"
+                  disabled={sel?.kind !== "group"}
+                  onClick={() => ungroup(sel?.kind === "group" ? sel.ids : [])}
+                  className="flex size-10 items-center justify-center rounded-lg hover:bg-ground disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
+                >
+                  <Ungroup size={16} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-2">
+              <LayersPanel
+                data={b}
+                sel={sel}
+                owners={owners}
+                label={nodeLabel}
+                actions={{
+                  select: selectLayer,
+                  rename: (kind, id, title) => (kind === "node" ? patchNode(id, { title }) : patchGroup(id, { title })),
+                  toggle: toggleLayer,
+                  reorder: reorderLayer,
+                }}
+              />
+            </div>
+            <p className="border-t border-line px-4 py-3 text-[12px] leading-[1.5] text-muted">
+              Seret untuk mengubah urutan, klik dua kali untuk mengganti nama. Isi kelompok mengikuti posisinya di kanvas.
+            </p>
+          </aside>
+        )}
+
         {/* Kanvas */}
         <div
           ref={boardRef}
@@ -1241,7 +1454,7 @@ export function MoodboardCanvas({
           }}
         >
           <div className="absolute left-0 top-0 size-px origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-            {b.groups.map((g) => {
+            {b.groups.filter((g) => !g.hidden).map((g) => {
               const c = MOOD_GROUP_COLORS[g.color] ?? MOOD_GROUP_COLORS.netral;
               const on = selGroup?.id === g.id;
               return (
@@ -1255,7 +1468,7 @@ export function MoodboardCanvas({
                     <span className="truncate text-[14px] font-extrabold">{g.title || "Kelompok"}</span>
                     <span className="whitespace-nowrap text-[11px] font-semibold text-muted">{b.nodes.filter((n) => insideRect(box(n), g)).length} elemen</span>
                   </div>
-                  {on && <Handles zoom={zoom} corners={["se"]} onDown={(e, c2) => onResizeDown(e, g.id, "groups", c2)} />}
+                  {on && !g.locked && <Handles zoom={zoom} corners={["se"]} onDown={(e, c2) => onResizeDown(e, g.id, "groups", c2)} />}
                 </div>
               );
             })}
@@ -1264,7 +1477,7 @@ export function MoodboardCanvas({
               {b.edges.map((ed) => {
                 const A = byId.get(ed.from);
                 const B = byId.get(ed.to);
-                if (!A || !B) return null;
+                if (!A || !B || !shownIds.has(A.id) || !shownIds.has(B.id)) return null;
                 const { d } = curve(box(A), box(B));
                 const on = selEdge?.id === ed.id;
                 return (
@@ -1291,7 +1504,7 @@ export function MoodboardCanvas({
             {b.edges.map((ed) => {
               const A = byId.get(ed.from);
               const B = byId.get(ed.to);
-              if (!A || !B || !ed.label) return null;
+              if (!A || !B || !ed.label || !shownIds.has(A.id) || !shownIds.has(B.id)) return null;
               return (
                 <EdgeLabel
                   key={ed.id}
@@ -1306,15 +1519,15 @@ export function MoodboardCanvas({
               );
             })}
 
-            {b.nodes.map((n) => {
+            {shownNodes.map((n) => {
               const r = box(n);
               const on = sel?.kind === "node" && selIds.includes(n.id);
               const single = on && selIds.length === 1;
               const card = isCard(n);
               const stroke = isStroke(n);
-              const linkable = !stroke && (tool === "select" || tool === "link");
+              const linkable = !stroke && !n.locked && (tool === "select" || tool === "link");
               const showHandles = single || tool === "link";
-              const resizable = single && n.type !== "palette" && editing !== n.id && tool === "select";
+              const resizable = single && !n.locked && n.type !== "palette" && editing !== n.id && tool === "select";
               return (
                 <div
                   key={n.id}
@@ -1324,7 +1537,7 @@ export function MoodboardCanvas({
                   className={cx(
                     "group/node absolute box-border",
                     stroke && "pointer-events-none",
-                    tool === "select" && !stroke && editing !== n.id && "cursor-move",
+                    tool === "select" && !stroke && !n.locked && editing !== n.id && "cursor-move",
                     tool === "link" && "cursor-crosshair",
                     card && "rounded-[18px] border-2",
                     card && (n.type === "note" ? "bg-note-bg" : "bg-surface"),
@@ -1408,7 +1621,7 @@ export function MoodboardCanvas({
                 className="pointer-events-none absolute box-border flex flex-col overflow-hidden rounded-[18px] border-2 border-line bg-surface"
                 style={{ left: p.x, top: p.y, width: MEDIA_W.portrait, height: 312 }}
               >
-                <div className="flex-1 animate-pulse bg-[#e8e7ef]" />
+                <div className="flex-1 bg-[#e8e7ef]" />
                 <div className="flex items-center px-3 text-[12px] font-semibold text-muted" style={{ height: MEDIA_FOOTER }}>
                   Mengambil dari {p.source}…
                 </div>
@@ -1479,120 +1692,14 @@ export function MoodboardCanvas({
             </div>
           )}
 
-          {/* Alat */}
-          <div
-            role="toolbar"
-            aria-label="Alat moodboard"
-            aria-orientation="vertical"
-            onPointerDown={(e) => e.stopPropagation()}
-            className="absolute left-3 top-3 flex max-h-[calc(100%-24px)] flex-col gap-1 overflow-y-auto rounded-2xl border border-line bg-surface p-1.5 shadow-bar [scrollbar-width:none]"
-          >
-            <ToolButton label="Pilih" hint="Pilih dan geser (V)" on={tool === "select"} onClick={() => setTool("select")} icon={<MousePointer2 size={18} aria-hidden="true" />} />
-            <ToolButton label="Tangan" hint="Geser kanvas (H, atau tahan Spasi)" on={tool === "hand"} onClick={() => setTool("hand")} icon={<Hand size={18} aria-hidden="true" />} />
-            <ToolButton label="Sambung" hint="Sambung kartu (C)" on={tool === "link"} onClick={() => setTool("link")} icon={<Spline size={18} aria-hidden="true" />} />
-            <div className="mx-1.5 my-0.5 h-px shrink-0 bg-line" />
-            <ToolButton label="Pena" hint="Gambar bebas (P)" on={tool === "pen"} onClick={() => setTool("pen")} icon={<PenLine size={18} aria-hidden="true" />} />
-            <ToolButton label="Hapus" hint="Penghapus goresan pena (E)" on={tool === "eraser"} onClick={() => setTool("eraser")} icon={<Eraser size={18} aria-hidden="true" />} />
-            <Popover>
-              <PopoverTrigger
-                title="Bentuk (R)"
-                aria-pressed={tool === "shape"}
-                aria-label={`Bentuk (R), sekarang ${SHAPES.find((s) => s.k === shapeKind)!.name}`}
-                onClick={() => setTool("shape")}
-                className={cx(TOOL_CLASS, tool === "shape" ? "bg-accent text-ink" : "hover:bg-ground")}
-              >
-                {SHAPES.find((s) => s.k === shapeKind)!.icon}
-                <span className={TOOL_LABEL}>Bentuk</span>
-              </PopoverTrigger>
-              <PopoverContent side="right" align="start" className="flex w-auto flex-col gap-1 p-1.5">
-                {SHAPES.map((s) => (
-                  <button
-                    key={s.k}
-                    type="button"
-                    aria-pressed={shapeKind === s.k}
-                    onClick={() => {
-                      setShapeKind(s.k);
-                      setTool("shape");
-                    }}
-                    className={cx("flex h-11 items-center gap-2.5 rounded-xl px-3 text-[13px] font-bold", shapeKind === s.k ? "bg-ground" : "hover:bg-sunken")}
-                  >
-                    {s.icon}
-                    {s.name}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
-            <ToolButton label="Teks" hint="Tulis teks (T)" on={tool === "text"} onClick={() => setTool("text")} icon={<Type size={18} aria-hidden="true" />} />
-            <div className="mx-1.5 my-0.5 h-px shrink-0 bg-line" />
-            <label title="Tambah foto" className={cx(TOOL_CLASS, "cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-ground")}>
-              <ImageIcon size={18} aria-hidden="true" />
-              <span className={TOOL_LABEL}>Foto</span>
-              <input
-                type="file"
-                accept={PHOTO_MIME.join(",")}
-                multiple
-                aria-label="Tambah foto"
-                className="sr-only"
-                onChange={(e) => {
-                  addPhotos(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <Popover open={linkOpen} onOpenChange={setLinkOpen}>
-              <PopoverTrigger
-                title="Tambah dari link"
-                aria-label="Tambah dari link Instagram, Pinterest, atau situs lain"
-                className={cx(TOOL_CLASS, linkOpen ? "bg-accent text-ink" : "hover:bg-ground")}
-              >
-                <Link2 size={18} aria-hidden="true" />
-                <span className={TOOL_LABEL}>Link</span>
-              </PopoverTrigger>
-              <PopoverContent side="right" align="start" className="w-[320px] p-3">
-                <form
-                  className="flex flex-col gap-2.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const u = linkUrl.trim();
-                    if (!isLink(u)) return flash("Itu bukan link. Salin alamat lengkap yang diawali https://.");
-                    void importLink(u);
-                    setLinkUrl("");
-                    setLinkOpen(false);
-                  }}
-                >
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-[12px] font-semibold text-muted">Link foto atau video</span>
-                    <Input autoFocus type="url" inputMode="url" value={linkUrl} placeholder="https://www.instagram.com/p/…" onChange={(e) => setLinkUrl(e.target.value)} />
-                  </label>
-                  <p className="text-[12px] leading-[1.5] text-muted">
-                    Postingan Instagram, Pin Pinterest, atau halaman lain. Carousel jadi satu kartu, video bisa diputar. Bisa juga langsung Ctrl+V di kanvas.
-                  </p>
-                  <button type="submit" disabled={!linkUrl.trim()} className="h-11 rounded-xl bg-ink text-[13px] font-bold text-white hover:bg-[#2e2d40] disabled:opacity-60">
-                    Tambahkan ke papan
-                  </button>
-                </form>
-              </PopoverContent>
-            </Popover>
-            <ToolButton label="Catatan" hint="Tambah catatan" onClick={() => addNode({ type: "note", title: "Catatan baru", text: "" })} icon={<NotebookPen size={18} aria-hidden="true" />} />
-            <ToolButton
-              label="Warna"
-              hint="Tambah palet warna"
-              onClick={() => addNode({ type: "palette", title: "Palet baru", swatches: ["#f4f1ea", "#d9d8e4", "#7c8b6a"] })}
-              icon={<Palette size={18} aria-hidden="true" />}
-            />
-            <ToolButton label="Kelompok" hint="Tambah kelompok, misalnya Pelaminan atau Busana" onClick={addGroup} icon={<SquareDashed size={18} aria-hidden="true" />} />
-          </div>
+          {followed && <div className="pointer-events-none absolute inset-0 border-[3px]" style={{ borderColor: followed.color }} aria-hidden="true" />}
 
-          {(tool === "pen" || tool === "shape" || tool === "text") && (
-            <ToolOptions tool={tool} closedShape={shapeKind === "rect" || shapeKind === "ellipse"} style={style} onChange={(s) => setStyle((x) => ({ ...x, ...s }))} />
-          )}
-
-          {followed && (
-            <>
-              <div className="pointer-events-none absolute inset-0 border-[3px]" style={{ borderColor: followed.color }} aria-hidden="true" />
+          {/* Alat di bawah, seperti Figma. Petunjuk dan pengaturan alat bertumpuk di atasnya. */}
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-col items-center gap-2">
+            {followed ? (
               <div
                 onPointerDown={(e) => e.stopPropagation()}
-                className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl py-1 pl-3.5 pr-1 text-[13px] font-semibold text-white shadow-bar"
+                className="pointer-events-auto flex items-center gap-2 rounded-xl py-1 pl-3.5 pr-1 text-[13px] font-semibold text-white"
                 style={{ background: followed.color }}
               >
                 Mengikuti {firstName(followed.name)}
@@ -1600,11 +1707,111 @@ export function MoodboardCanvas({
                   Berhenti
                 </button>
               </div>
-            </>
-          )}
-          {!followed && toolHint && (
-            <p className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-xl bg-ink px-3.5 py-2.5 text-[13px] font-semibold text-white shadow-bar">{toolHint}</p>
-          )}
+            ) : (
+              toolHint && <p className="max-w-full rounded-xl bg-ink px-3.5 py-2.5 text-center text-[13px] font-semibold text-white">{toolHint}</p>
+            )}
+            {(tool === "pen" || tool === "shape" || tool === "text") && (
+              <ToolOptions tool={tool} closedShape={shapeKind === "rect" || shapeKind === "ellipse"} style={style} onChange={(s) => setStyle((x) => ({ ...x, ...s }))} />
+            )}
+            <div
+              role="toolbar"
+              aria-label="Alat moodboard"
+              onPointerDown={(e) => e.stopPropagation()}
+              className="pointer-events-auto flex max-w-full items-center gap-0.5 overflow-x-auto rounded-2xl border border-line bg-surface p-1.5 shadow-bar [scrollbar-width:none]"
+            >
+              <ToolButton label="Pilih" hint="Pilih dan geser (V)" on={tool === "select"} onClick={() => setTool("select")} icon={<MousePointer2 size={18} aria-hidden="true" />} />
+              <ToolButton label="Tangan" hint="Geser kanvas (H, atau tahan Spasi)" on={tool === "hand"} onClick={() => setTool("hand")} icon={<Hand size={18} aria-hidden="true" />} />
+              <ToolButton label="Sambung" hint="Sambung kartu (C)" on={tool === "link"} onClick={() => setTool("link")} icon={<Spline size={18} aria-hidden="true" />} />
+              <span className="mx-1 h-6 w-px shrink-0 bg-line" aria-hidden="true" />
+              <ToolButton label="Pena" hint="Gambar bebas (P)" on={tool === "pen"} onClick={() => setTool("pen")} icon={<PenLine size={18} aria-hidden="true" />} />
+              <ToolButton label="Hapus" hint="Penghapus goresan pena (E)" on={tool === "eraser"} onClick={() => setTool("eraser")} icon={<Eraser size={18} aria-hidden="true" />} />
+              <Popover>
+                <PopoverTrigger
+                  title="Bentuk (R)"
+                  aria-pressed={tool === "shape"}
+                  aria-label={`Bentuk (R), sekarang ${SHAPES.find((s) => s.k === shapeKind)!.name}`}
+                  onClick={() => setTool("shape")}
+                  className={cx(TOOL_CLASS, tool === "shape" ? "bg-accent text-ink" : "hover:bg-ground")}
+                >
+                  {SHAPES.find((s) => s.k === shapeKind)!.icon}
+                </PopoverTrigger>
+                <PopoverContent side="top" align="center" className="flex w-auto flex-col gap-1 p-1.5">
+                  {SHAPES.map((s) => (
+                    <button
+                      key={s.k}
+                      type="button"
+                      aria-pressed={shapeKind === s.k}
+                      onClick={() => {
+                        setShapeKind(s.k);
+                        setTool("shape");
+                      }}
+                      className={cx("flex h-11 items-center gap-2.5 rounded-xl px-3 text-[13px] font-bold", shapeKind === s.k ? "bg-ground" : "hover:bg-sunken")}
+                    >
+                      {s.icon}
+                      {s.name}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+              <ToolButton label="Teks" hint="Tulis teks (T)" on={tool === "text"} onClick={() => setTool("text")} icon={<Type size={18} aria-hidden="true" />} />
+              <span className="mx-1 h-6 w-px shrink-0 bg-line" aria-hidden="true" />
+              <label title="Unggah foto" className={cx(TOOL_CLASS, "cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-ground")}>
+                <ImageIcon size={18} aria-hidden="true" />
+                <input
+                  type="file"
+                  accept={PHOTO_MIME.join(",")}
+                  multiple
+                  aria-label="Unggah foto"
+                  className="sr-only"
+                  onChange={(e) => {
+                    addPhotos(e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+                <PopoverTrigger
+                  title="Tambah dari link"
+                  aria-label="Tambah dari link Instagram, Pinterest, atau situs lain"
+                  className={cx(TOOL_CLASS, linkOpen ? "bg-accent text-ink" : "hover:bg-ground")}
+                >
+                  <Link2 size={18} aria-hidden="true" />
+                </PopoverTrigger>
+                <PopoverContent side="top" align="center" className="w-[320px] p-3">
+                  <form
+                    className="flex flex-col gap-2.5"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const u = linkUrl.trim();
+                      if (!isLink(u)) return flash("Itu bukan link. Salin alamat lengkap yang diawali https://.");
+                      void importLink(u);
+                      setLinkUrl("");
+                      setLinkOpen(false);
+                    }}
+                  >
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-[12px] font-semibold text-muted">Link foto atau video</span>
+                      <Input autoFocus type="url" inputMode="url" value={linkUrl} placeholder="https://www.instagram.com/p/…" onChange={(e) => setLinkUrl(e.target.value)} />
+                    </label>
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      Postingan Instagram, Pin Pinterest, atau halaman lain. Carousel jadi satu kartu, video bisa diputar. Bisa juga langsung Ctrl+V di kanvas.
+                    </p>
+                    <button type="submit" disabled={!linkUrl.trim()} className="h-11 rounded-xl bg-ink text-[13px] font-bold text-white hover:bg-[#2e2d40] disabled:opacity-60">
+                      Tambahkan ke papan
+                    </button>
+                  </form>
+                </PopoverContent>
+              </Popover>
+              <ToolButton label="Catatan" hint="Tambah catatan" onClick={() => addNode({ type: "note", title: "Catatan baru", text: "" })} icon={<NotebookPen size={18} aria-hidden="true" />} />
+              <ToolButton
+                label="Warna"
+                hint="Tambah palet warna"
+                onClick={() => addNode({ type: "palette", title: "Palet baru", swatches: ["#f4f1ea", "#d9d8e4", "#7c8b6a"] })}
+                icon={<Palette size={18} aria-hidden="true" />}
+              />
+              <ToolButton label="Kelompok" hint="Tambah kelompok kosong, misalnya Pelaminan atau Busana" onClick={addGroup} icon={<SquareDashed size={18} aria-hidden="true" />} />
+            </div>
+          </div>
           {notice && (
             <p role="alert" className="absolute right-3 top-3 max-w-[320px] rounded-xl bg-warn-bg px-3.5 py-2.5 text-[13px] font-semibold text-warn-fg">
               {notice}
@@ -1612,34 +1819,96 @@ export function MoodboardCanvas({
           )}
         </div>
 
-        {/* Panel detail */}
-        <aside aria-label="Detail" className="flex w-[264px] shrink-0 flex-col gap-4 overflow-y-auto *:shrink-0 border-l border-line p-4 min-[1200px]:w-[300px] min-[1200px]:p-5">
+        {/* Panel properti: semua pengaturan elemen yang dipilih. */}
+        <aside aria-label="Properti" className="flex w-[272px] shrink-0 flex-col overflow-y-auto border-l border-line *:shrink-0 min-[1200px]:w-[296px]">
           {selNodes.length > 1 ? (
             <>
               <PanelHead label={`${selNodes.length} elemen dipilih`} onDone={() => setSel(null)} />
+              <Section title="Ratakan">
+                <div role="group" aria-label="Ratakan" className="flex gap-0.5 rounded-xl bg-ground p-1">
+                  <IconAction label="Rata kiri" onClick={() => alignSelected("left")}>
+                    <AlignStartVertical size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Rata tengah mendatar" onClick={() => alignSelected("hcenter")}>
+                    <AlignCenterVertical size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Rata kanan" onClick={() => alignSelected("right")}>
+                    <AlignEndVertical size={17} aria-hidden="true" />
+                  </IconAction>
+                  <span className="mx-0.5 my-2 w-px shrink-0 bg-line" aria-hidden="true" />
+                  <IconAction label="Rata atas" onClick={() => alignSelected("top")}>
+                    <AlignStartHorizontal size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Rata tengah tegak" onClick={() => alignSelected("vcenter")}>
+                    <AlignCenterHorizontal size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Rata bawah" onClick={() => alignSelected("bottom")}>
+                    <AlignEndHorizontal size={17} aria-hidden="true" />
+                  </IconAction>
+                </div>
+              </Section>
               {selNodes.every((n) => n.color !== undefined) && (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-2 text-[12px] font-semibold text-muted">Warna semua</legend>
+                <Section title="Warna semua">
                   <ColorField label="Warna semua elemen" value={selNodes[0].color ?? "#1c1b29"} swatches={boardColors} onChange={(color) => patchSelected({ color }, `color:${selIds.join()}`)} />
-                </fieldset>
+                </Section>
               )}
-              <div className="grid grid-cols-2 gap-1.5">
-                <button type="button" onClick={bringToFront} className="h-11 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                  Ke depan
-                </button>
-                <button type="button" onClick={duplicateSelection} className="h-11 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                  Duplikat
-                </button>
-              </div>
-              <p className="text-[13px] leading-[1.5] text-muted">Geser salah satu untuk memindahkan semuanya. Shift dan klik untuk menambah atau mengurangi pilihan.</p>
-              <DangerButton onClick={removeSelection}>Hapus {selNodes.length} elemen</DangerButton>
+              <Section title="Susun">
+                <div role="group" aria-label="Urutan lapisan" className="flex gap-0.5 rounded-xl bg-ground p-1">
+                  <IconAction label="Paling depan (Ctrl+Shift+])" onClick={() => restack("front")}>
+                    <ChevronsUp size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Maju satu (Ctrl+])" onClick={() => restack("forward")}>
+                    <ArrowUp size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Mundur satu (Ctrl+[)" onClick={() => restack("backward")}>
+                    <ArrowDown size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Paling belakang (Ctrl+Shift+[)" onClick={() => restack("back")}>
+                    <ChevronsDown size={17} aria-hidden="true" />
+                  </IconAction>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button type="button" onClick={groupSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
+                    <Group size={16} aria-hidden="true" />
+                    Kelompokkan
+                  </button>
+                  <button type="button" onClick={duplicateSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
+                    <Copy size={16} aria-hidden="true" />
+                    Duplikat
+                  </button>
+                </div>
+                <p className="text-[12px] leading-[1.5] text-muted">Geser salah satu untuk memindahkan semuanya. Shift dan klik untuk menambah atau mengurangi pilihan.</p>
+              </Section>
+              <Section>
+                <DangerButton onClick={removeSelection}>Hapus {selNodes.length} elemen</DangerButton>
+              </Section>
             </>
           ) : selNode ? (
             <>
               <PanelHead label={PANEL_LABEL[selNode.type]} onDone={() => setSel(null)} />
-              {isCard(selNode) && <TextField label="Judul" value={selNode.title} max={120} onChange={(v) => patchNode(selNode.id, { title: v }, `title:${selNode.id}`)} />}
+              {isCard(selNode) && (
+                <Section>
+                  <TextField label="Judul" value={selNode.title} max={120} onChange={(v) => patchNode(selNode.id, { title: v }, `title:${selNode.id}`)} />
+                </Section>
+              )}
+              <Section title="Posisi dan ukuran">
+                <GeometryFields
+                  r={box(selNode)}
+                  lockH={selNode.type === "text" || selNode.type === "media"}
+                  lockWH={selNode.type === "palette"}
+                  onChange={(p) => setGeometry(selNode, p)}
+                />
+                {selNode.locked && (
+                  <p className="text-[12px] leading-[1.5] text-muted">
+                    Terkunci, jadi tidak bisa dipilih atau digeser di kanvas.{" "}
+                    <button type="button" onClick={() => toggleLayer("node", selNode.id, "locked")} className="hit-44 font-bold text-ink underline underline-offset-2">
+                      Buka kunci
+                    </button>
+                  </p>
+                )}
+              </Section>
               {selNode.type === "text" && (
-                <>
+                <Section title="Teks">
                   <label className="flex flex-col gap-1.5">
                     <span className="text-[12px] font-semibold text-muted">Isi teks</span>
                     <Textarea
@@ -1651,15 +1920,17 @@ export function MoodboardCanvas({
                     />
                   </label>
                   <TextPanel n={selNode} colors={boardColors} onChange={(p) => patchNode(selNode.id, p, `style:${selNode.id}:${Object.keys(p).join()}`)} />
-                </>
+                </Section>
               )}
               {(selNode.type === "shape" || selNode.type === "draw") && (
-                <StrokePanel n={selNode} colors={boardColors} onChange={(p) => patchNode(selNode.id, p, `style:${selNode.id}:${Object.keys(p).join()}`)} />
+                <Section title={selNode.type === "draw" ? "Tinta" : "Garis dan isi"}>
+                  <StrokePanel n={selNode} colors={boardColors} onChange={(p) => patchNode(selNode.id, p, `style:${selNode.id}:${Object.keys(p).join()}`)} />
+                </Section>
               )}
               {selNode.type === "note" && (
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold text-muted">Isi catatan</span>
+                <Section title="Isi catatan">
                   <Textarea
+                    aria-label="Isi catatan"
                     rows={5}
                     maxLength={2000}
                     value={selNode.text ?? ""}
@@ -1667,29 +1938,30 @@ export function MoodboardCanvas({
                     onChange={(e) => patchNode(selNode.id, { text: e.target.value }, `text:${selNode.id}`)}
                     className="resize-y leading-[1.5]"
                   />
-                </label>
-              )}
-              {selNode.type === "photo" && photoSrc(selNode) && (
-                <PhotoAdjust n={selNode} src={photoSrc(selNode)!} onChange={(patch) => patchNode(selNode.id, patch, `photo:${selNode.id}`)} onOpen={() => setViewer(selNode.id)} />
+                </Section>
               )}
               {selNode.type === "photo" && (
-                <label className="relative flex h-11 cursor-pointer items-center justify-center rounded-xl border border-outline text-[13px] font-bold focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-sunken">
-                  {uploads[selNode.id] ? "Mengunggah…" : "Ganti foto"}
-                  <input
-                    type="file"
-                    accept={PHOTO_MIME.join(",")}
-                    disabled={!!uploads[selNode.id]}
-                    className="sr-only"
-                    onChange={(e) => {
-                      replacePhoto(selNode.id, e.target.files?.[0]);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
+                <Section title="Foto">
+                  {photoSrc(selNode) && (
+                    <PhotoAdjust n={selNode} src={photoSrc(selNode)!} onChange={(patch) => patchNode(selNode.id, patch, `photo:${selNode.id}`)} onOpen={() => setViewer(selNode.id)} />
+                  )}
+                  <label className="relative flex h-11 cursor-pointer items-center justify-center rounded-xl border border-outline text-[13px] font-bold focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-sunken">
+                    {uploads[selNode.id] ? "Mengunggah…" : "Ganti foto"}
+                    <input
+                      type="file"
+                      accept={PHOTO_MIME.join(",")}
+                      disabled={!!uploads[selNode.id]}
+                      className="sr-only"
+                      onChange={(e) => {
+                        replacePhoto(selNode.id, e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                </Section>
               )}
               {selNode.type === "media" && selNode.url && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold text-muted">Sumber</span>
+                <Section title="Sumber">
                   <a
                     href={selNode.url}
                     target="_blank"
@@ -1704,11 +1976,10 @@ export function MoodboardCanvas({
                       {selNode.media!.length} foto dan video. Geser foto di kartu ke kiri atau kanan, atau pakai tombol panah. Pindahkan kartu lewat judulnya.
                     </p>
                   )}
-                </div>
+                </Section>
               )}
               {selNode.type === "palette" && (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-2 text-[12px] font-semibold text-muted">Warna</legend>
+                <Section title="Warna palet">
                   {(selNode.swatches ?? []).map((c, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <ColorField
@@ -1736,11 +2007,10 @@ export function MoodboardCanvas({
                       Tambah warna
                     </button>
                   )}
-                </fieldset>
+                </Section>
               )}
               {isCard(selNode) && (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-2 text-[12px] font-semibold text-muted">Tag</legend>
+                <Section title="Tag">
                   <div className="flex flex-wrap gap-1.5">
                     {allTags.map((t) => {
                       const on = selNode.tags.includes(t);
@@ -1761,7 +2031,7 @@ export function MoodboardCanvas({
                     })}
                   </div>
                   <form
-                    className="mt-1 flex gap-2"
+                    className="flex gap-2"
                     onSubmit={(e) => {
                       e.preventDefault();
                       const t = newTag.trim().replace(/\s+/g, " ").slice(0, MOOD_TAG_MAX);
@@ -1780,11 +2050,10 @@ export function MoodboardCanvas({
                     </button>
                   </form>
                   <p className="text-[12px] text-muted">Tag buatan sendiri muncul di semua papan. Tag yang tidak dipakai kartu mana pun hilang dari daftar.</p>
-                </fieldset>
+                </Section>
               )}
               {!isStroke(selNode) && b.nodes.filter((n) => !isStroke(n)).length > 1 && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[12px] font-semibold text-muted">Sambungkan ke elemen lain</span>
+                <Section title="Sambungan">
                   <div className="flex gap-2">
                     <div className="min-w-0 flex-1">
                       <SelectField
@@ -1809,42 +2078,76 @@ export function MoodboardCanvas({
                       Sambung
                     </button>
                   </div>
-                </div>
+                </Section>
               )}
-              <div className="mt-auto flex flex-col gap-1.5">
+              <Section title="Susun">
+                <div role="group" aria-label="Urutan lapisan" className="flex gap-0.5 rounded-xl bg-ground p-1">
+                  <IconAction label="Paling depan (Ctrl+Shift+])" onClick={() => restack("front")}>
+                    <ChevronsUp size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Maju satu (Ctrl+])" onClick={() => restack("forward")}>
+                    <ArrowUp size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Mundur satu (Ctrl+[)" onClick={() => restack("backward")}>
+                    <ArrowDown size={17} aria-hidden="true" />
+                  </IconAction>
+                  <IconAction label="Paling belakang (Ctrl+Shift+[)" onClick={() => restack("back")}>
+                    <ChevronsDown size={17} aria-hidden="true" />
+                  </IconAction>
+                </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <button type="button" onClick={bringToFront} className="h-11 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                    Ke depan
+                  <button type="button" onClick={groupSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
+                    <Group size={16} aria-hidden="true" />
+                    Kelompokkan
                   </button>
-                  <button type="button" onClick={duplicateSelection} className="h-11 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
+                  <button type="button" onClick={duplicateSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
+                    <Copy size={16} aria-hidden="true" />
                     Duplikat
                   </button>
                 </div>
+              </Section>
+              <Section>
                 <DangerButton onClick={removeSelection}>Hapus {isCard(selNode) ? "kartu" : "elemen"}</DangerButton>
-              </div>
+              </Section>
             </>
           ) : selEdge ? (
             <>
               <PanelHead label="Sambungan" onDone={() => setSel(null)} />
-              <dl className="flex flex-col gap-1.5 text-[14px]">
-                <div>
-                  <dt className="text-[11px] font-semibold text-muted">Dari</dt>
-                  <dd className="font-bold">{byId.get(selEdge.from) ? nodeLabel(byId.get(selEdge.from)!) : "Tanpa judul"}</dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] font-semibold text-muted">Ke</dt>
-                  <dd className="font-bold">{byId.get(selEdge.to) ? nodeLabel(byId.get(selEdge.to)!) : "Tanpa judul"}</dd>
-                </div>
-              </dl>
-              <TextField label="Label sambungan" value={selEdge.label} max={80} placeholder="Misal: warna ikut ini" onChange={(v) => patchEdge(selEdge.id, { label: v }, `label:${selEdge.id}`)} />
-              <DangerButton onClick={removeSelection}>Hapus sambungan</DangerButton>
+              <Section>
+                <dl className="flex flex-col gap-1.5 text-[14px]">
+                  <div>
+                    <dt className="text-[11px] font-semibold text-muted">Dari</dt>
+                    <dd className="font-bold">{byId.get(selEdge.from) ? nodeLabel(byId.get(selEdge.from)!) : "Tanpa judul"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] font-semibold text-muted">Ke</dt>
+                    <dd className="font-bold">{byId.get(selEdge.to) ? nodeLabel(byId.get(selEdge.to)!) : "Tanpa judul"}</dd>
+                  </div>
+                </dl>
+                <TextField label="Label sambungan" value={selEdge.label} max={80} placeholder="Misal: warna ikut ini" onChange={(v) => patchEdge(selEdge.id, { label: v }, `label:${selEdge.id}`)} />
+              </Section>
+              <Section>
+                <DangerButton onClick={removeSelection}>Hapus sambungan</DangerButton>
+              </Section>
             </>
           ) : selGroup ? (
             <>
               <PanelHead label="Kelompok" onDone={() => setSel(null)} />
-              <TextField label="Nama kelompok" value={selGroup.title} max={80} placeholder="Misal: Pelaminan dan dekor" onChange={(v) => patchGroup(selGroup.id, { title: v }, `title:${selGroup.id}`)} />
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-2 text-[12px] font-semibold text-muted">Warna latar</legend>
+              <Section>
+                <TextField label="Nama kelompok" value={selGroup.title} max={80} placeholder="Misal: Pelaminan dan dekor" onChange={(v) => patchGroup(selGroup.id, { title: v }, `title:${selGroup.id}`)} />
+              </Section>
+              <Section title="Posisi dan ukuran">
+                <GeometryFields r={selGroup} onChange={(p) => setGroupGeometry(selGroup, p)} />
+                {selGroup.locked && (
+                  <p className="text-[12px] leading-[1.5] text-muted">
+                    Terkunci, jadi tidak bisa digeser di kanvas.{" "}
+                    <button type="button" onClick={() => toggleLayer("group", selGroup.id, "locked")} className="hit-44 font-bold text-ink underline underline-offset-2">
+                      Buka kunci
+                    </button>
+                  </p>
+                )}
+              </Section>
+              <Section title="Warna latar">
                 <div className="flex flex-wrap gap-1.5">
                   {Object.entries(MOOD_GROUP_COLORS).map(([k, c]) => {
                     const on = selGroup.color === k;
@@ -1862,55 +2165,63 @@ export function MoodboardCanvas({
                     );
                   })}
                 </div>
-              </fieldset>
-              <p className="text-[13px] leading-[1.5] text-muted">
-                {b.nodes.filter((n) => insideRect(box(n), selGroup)).length} elemen di dalam kelompok ini. Elemen ikut berpindah saat kelompok digeser.
-              </p>
-              <div className="mt-auto flex flex-col gap-1.5">
+              </Section>
+              <Section title="Isi">
+                <p className="text-[13px] leading-[1.5] text-muted">
+                  {b.nodes.filter((n) => owners.get(n.id) === selGroup.id).length} elemen di dalam kelompok ini. Elemen ikut berpindah saat kelompok digeser.
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={!b.nodes.some((n) => owners.get(n.id) === selGroup.id)}
+                    onClick={() => setSel({ kind: "node", ids: b.nodes.filter((n) => owners.get(n.id) === selGroup.id && pickable(n)).map((n) => n.id) })}
+                    className="h-11 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef] disabled:text-muted"
+                  >
+                    Pilih isinya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => ungroup([selGroup.id])}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <Ungroup size={16} aria-hidden="true" />
+                    Lepas
+                  </button>
+                </div>
+              </Section>
+              <Section>
                 <DangerButton onClick={removeSelection}>Hapus kelompok</DangerButton>
                 <p className="text-center text-[12px] text-muted">Elemen di dalamnya tidak ikut terhapus.</p>
-              </div>
+              </Section>
             </>
           ) : (
             <>
-              <div className="flex flex-col gap-1">
-                <h2 className="text-[18px] font-extrabold">{boardName}</h2>
-                <p className="text-[13px] text-muted">
+              <div className="flex min-h-14 flex-col justify-center border-b border-line px-4 py-2">
+                <h2 className="text-[14px] font-extrabold">Papan {boardName}</h2>
+                <p className="text-[12px] text-muted">
                   {b.nodes.length} elemen dan {b.groups.length} kelompok
                 </p>
               </div>
-              {b.nodes.length > 0 && (
-                <nav aria-label="Elemen di papan ini" className="flex flex-col gap-1">
-                  {b.nodes.map((n) => (
-                    <button
-                      key={n.id}
-                      type="button"
-                      onClick={() => {
-                        setSel({ kind: "node", ids: [n.id] });
-                        setFollowing(null);
-                        reveal(n);
-                      }}
-                      className="flex min-h-11 items-center gap-2 rounded-xl px-2.5 text-left text-[13px] font-semibold hover:bg-ground"
-                    >
-                      <span className="w-14 shrink-0 text-[11px] text-muted">{TYPE_LABEL[n.type]}</span>
-                      <span className="truncate">{nodeLabel(n)}</span>
-                    </button>
-                  ))}
-                </nav>
-              )}
-              <div id="mb-help" className="flex flex-col gap-3 text-[13px] leading-[1.5]">
-                <Help title="Susun">
-                  Tarik elemen untuk memindah. Tarik area kosong untuk memilih beberapa sekaligus. Geser kanvas dengan alat Tangan, tahan Spasi, atau satu jari di tablet. Ctrl dan scroll, atau cubit dua jari, untuk zoom.
-                </Help>
-                <Help title="Gambar dan tulis">Pena untuk coretan bebas, Bentuk untuk kotak, lingkaran, garis, dan panah, Teks untuk tulisan dengan pilihan font termasuk tulisan tangan.</Help>
-                <Help title="Dari link">
-                  Tempel link Instagram, Pinterest, atau situs lain dengan Ctrl+V di kanvas, atau pakai alat Link. Foto tidak terpotong, carousel jadi satu kartu, dan video bisa diputar.
-                </Help>
-                <Help title="Bersama">Kursor anggota lain terlihat dengan nama di bawahnya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
-                <Help title="Keyboard">
-                  V Pilih, H Tangan, C Sambung, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
-                </Help>
-              </div>
+              <Section>
+                <p className="text-[13px] leading-[1.5] text-muted">Pilih elemen di kanvas atau di panel Layer untuk mengubah isi, ukuran, dan urutannya di sini.</p>
+              </Section>
+              <Section title="Petunjuk">
+                <div id="mb-help" className="flex flex-col gap-3 text-[13px] leading-[1.5]">
+                  <Help title="Susun">
+                    Tarik elemen untuk memindah. Tarik area kosong untuk memilih beberapa sekaligus. Geser kanvas dengan alat Tangan, tahan Spasi, atau satu jari di tablet. Ctrl dan scroll, atau cubit dua jari, untuk zoom.
+                  </Help>
+                  <Help title="Layer dan kelompok">
+                    Ctrl+G mengelompokkan pilihan, Ctrl+Shift+G melepasnya. Ctrl+] dan Ctrl+[ memindah lapisan, tambah Shift untuk paling depan atau paling belakang. Kunci dan sembunyikan dari panel Layer.
+                  </Help>
+                  <Help title="Dari link">
+                    Tempel link Instagram, Pinterest, atau situs lain dengan Ctrl+V di kanvas, atau pakai alat Link di bawah. Foto tidak terpotong, carousel jadi satu kartu, dan video bisa diputar.
+                  </Help>
+                  <Help title="Bersama">Kursor anggota lain terlihat dengan nama di bawahnya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
+                  <Help title="Keyboard">
+                    V Pilih, H Tangan, C Sambung, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
+                  </Help>
+                </div>
+              </Section>
             </>
           )}
         </aside>
@@ -1960,16 +2271,13 @@ export function MoodboardCanvas({
   );
 }
 
-// Tombol alat: berlabel di layar yang cukup tinggi, hanya ikon (dengan title dan aria-label) di layar pendek.
-const TOOL_CLASS =
-  "flex h-[52px] w-14 shrink-0 flex-col items-center justify-center gap-[3px] rounded-xl text-[11px] font-bold transition-colors duration-150 [@media(max-height:820px)]:h-11";
-const TOOL_LABEL = "[@media(max-height:820px)]:sr-only";
+// Tombol alat di toolbar bawah: hanya ikon, nama dan pintasan ada di title dan aria-label.
+const TOOL_CLASS = "flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors duration-150";
 
-function ToolButton({ label, hint, icon, on, onClick }: { label: string; hint: string; icon: React.ReactNode; on?: boolean; onClick: () => void }) {
+function ToolButton({ hint, icon, on, onClick }: { label: string; hint: string; icon: React.ReactNode; on?: boolean; onClick: () => void }) {
   return (
     <button type="button" title={hint} aria-label={hint} aria-pressed={on} onClick={onClick} className={cx(TOOL_CLASS, on ? "bg-accent text-ink" : "hover:bg-ground")}>
       {icon}
-      <span className={TOOL_LABEL}>{label}</span>
     </button>
   );
 }

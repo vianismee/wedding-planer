@@ -287,10 +287,7 @@ export function MediaCard({
       </div>
       <div className="flex min-w-0 shrink-0 flex-col justify-center gap-0.5 px-3" style={{ height: MEDIA_FOOTER }}>
         <div className="truncate text-[13px] font-bold leading-[1.4]">{n.title || "Tanpa judul"}</div>
-        <div className="truncate text-[11px] font-semibold text-muted">
-          {sourceName(n.url ?? "")}
-          {n.tags.length > 0 && ` · ${n.tags.slice(0, 3).join(", ")}`}
-        </div>
+        <div className="truncate text-[11px] font-semibold text-muted">Dari {sourceName(n.url ?? "")}</div>
       </div>
     </div>
   );

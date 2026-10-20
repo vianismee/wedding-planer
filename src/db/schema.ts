@@ -475,6 +475,9 @@ export type MoodNode = {
   focus?: { x: number; y: number };
   swatches?: string[];
   tags: string[];
+  // Dari panel Layer: dikunci (tidak bisa dipilih atau digeser di kanvas) dan disembunyikan.
+  locked?: boolean;
+  hidden?: boolean;
   // Teks bebas di kanvas.
   font?: string;
   fontSize?: number;
@@ -495,7 +498,7 @@ export type MoodNode = {
   media?: MoodMedia[];
 };
 export type MoodEdge = { id: string; from: string; to: string; label: string };
-export type MoodGroup = { id: string; x: number; y: number; w: number; h: number; title: string; color: string };
+export type MoodGroup = { id: string; x: number; y: number; w: number; h: number; title: string; color: string; locked?: boolean; hidden?: boolean };
 export type MoodData = { nodes: MoodNode[]; edges: MoodEdge[]; groups: MoodGroup[] };
 
 // Satu baris per papan (utama, akad, resepsi). `rev` naik tiap simpan, supaya simpanan

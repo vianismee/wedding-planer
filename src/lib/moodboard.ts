@@ -80,7 +80,9 @@ export type MoodOp =
   | { t: "put"; c: "groups"; item: MoodGroup }
   | { t: "patch"; c: MoodColl; id: string; set: Record<string, unknown> }
   | { t: "del"; c: MoodColl; id: string }
-  | { t: "front"; id: string };
+  | { t: "front"; id: string }
+  // Pindah urutan lapisan: elemen ditaruh di posisi `to` daftar (0 paling belakang). Dari panel Layer.
+  | { t: "z"; id: string; to: number };
 
 export const EMPTY_BOARD: MoodData = { nodes: [], edges: [], groups: [] };
 
@@ -112,6 +114,12 @@ export function applyOps(d: MoodData, ops: MoodOp[]): MoodData {
     } else if (op.t === "del") {
       out = { ...out, [op.c]: (out[op.c] as Item[]).filter((x) => x.id !== op.id) };
       if (op.c === "nodes") out = { ...out, edges: out.edges.filter((e) => e.from !== op.id && e.to !== op.id) };
+    } else if (op.t === "z") {
+      const n = out.nodes.find((x) => x.id === op.id);
+      if (!n) continue;
+      const rest = out.nodes.filter((x) => x.id !== op.id);
+      const to = Math.max(0, Math.min(rest.length, op.to));
+      out = { ...out, nodes: [...rest.slice(0, to), n, ...rest.slice(to)] };
     } else {
       const n = out.nodes.find((x) => x.id === op.id);
       if (n && out.nodes.at(-1)?.id !== op.id) out = { ...out, nodes: [...out.nodes.filter((x) => x.id !== op.id), n] };
@@ -136,9 +144,15 @@ export function invertOps(d: MoodData, ops: MoodOp[]): MoodOp[] {
       const old = (cur[op.c] as Item[]).find((x) => x.id === op.id);
       if (old) {
         step.push({ t: "put", c: op.c, item: old } as MoodOp);
+        // Kembali ke lapisan semula, bukan paling atas.
+        if (op.c === "nodes") step.push({ t: "z", id: op.id, to: cur.nodes.findIndex((x) => x.id === op.id) });
         // Sambungan ikut terhapus bersama kartunya, jadi ikut dikembalikan setelah kartunya ada lagi.
         if (op.c === "nodes") for (const e of cur.edges) if (e.from === op.id || e.to === op.id) step.push({ t: "put", c: "edges", item: e });
       }
+    } else {
+      // front dan z: kembalikan ke posisi lapisan semula.
+      const i = cur.nodes.findIndex((x) => x.id === op.id);
+      if (i >= 0) step.push({ t: "z", id: op.id, to: i });
     }
     steps.push(step);
     cur = applyOps(cur, [op]);

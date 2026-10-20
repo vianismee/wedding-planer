@@ -20,12 +20,15 @@ import {
   StrokeBody,
   TextBody,
 } from "@/app/(fokus)/moodboard/board-view";
+import { useNoPageZoom } from "@/app/(fokus)/moodboard/no-page-zoom";
 
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 3;
 
 /** Kanvas baca-saja untuk vendor: geser, zoom, cubit, dan buka foto. Bisa dipakai di HP. */
-export function MoodboardViewer({ data, token }: { data: MoodData; token: string }) {
+export function MoodboardViewer({ data: all, token }: { data: MoodData; token: string }) {
+  // Layer yang disembunyikan pasangan di editor tidak ikut terlihat oleh vendor. Sambungan ke elemen itu ikut hilang.
+  const data = { ...all, nodes: all.nodes.filter((n) => !n.hidden), groups: all.groups.filter((g) => !g.hidden) };
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 16, y: 16 });
   const [viewer, setViewer] = useState<string | null>(null);
@@ -66,6 +69,11 @@ export function MoodboardViewer({ data, token }: { data: MoodData; token: string
     setZoom(nz);
     setPan({ x: sx - ((sx - pan.x) / zoom) * nz, y: sy - ((sy - pan.y) / zoom) * nz });
   }
+
+  useNoPageZoom(ref, (f, cx, cy) => {
+    const r = ref.current!.getBoundingClientRect();
+    zoomAt(f === null ? 1 : zoom * f, cx - r.left, cy - r.top);
+  });
 
   function onDown(e: ReactPointerEvent) {
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -115,7 +123,7 @@ export function MoodboardViewer({ data, token }: { data: MoodData; token: string
   const empty = !data.nodes.length && !data.groups.length;
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden rounded-[22px] bg-surface">
+    <div className="relative min-h-0 flex-1 touch-manipulation overflow-hidden rounded-[22px] bg-surface">
       <div
         ref={ref}
         onPointerDown={onDown}

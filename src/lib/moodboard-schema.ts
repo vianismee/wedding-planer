@@ -17,6 +17,8 @@ const base = {
   h: len.optional(),
   title: z.string().max(120),
   tags: z.array(z.string().trim().min(1).max(MOOD_TAG_MAX)).max(MOOD_LIMITS.tags),
+  locked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 };
 
 export const nodeSchema = z.discriminatedUnion("type", [
@@ -79,6 +81,8 @@ const groupSchema = z.object({
   h: z.number().min(140).max(20_000),
   title: z.string().max(80),
   color: z.enum(Object.keys(MOOD_GROUP_COLORS) as [string, ...string[]]),
+  locked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
 });
 
 export const dataSchema = z.object({
@@ -101,6 +105,7 @@ export const opSchema = z.union([
   }),
   z.object({ t: z.literal("del"), c: coll, id }),
   z.object({ t: z.literal("front"), id }),
+  z.object({ t: z.literal("z"), id, to: z.number().int().min(0).max(MOOD_LIMITS.nodes) }),
 ]);
 
 export const boardId = z.enum(MOOD_BOARDS.map((b) => b.id) as [string, ...string[]]);

@@ -201,12 +201,15 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 
 - Kanvas bebas berisi kartu foto, catatan, dan palet, dengan kelompok bernama dan sambungan berlabel. Tiga papan: Konsep utama, Akad, Resepsi.
 - Layar penuh tanpa sidebar dan capsule (route group `(fokus)`). Tombol "Dashboard" di pojok kiri atas menjadi jalan kembali.
+- Tata letak seperti Figma: panel Layer di kiri (bisa ditutup, tertutup otomatis di bawah 1280px), kanvas di tengah dengan toolbar alat melayang di bawah, dan panel Properti di kanan. Toolbar bawah hanya ikon; nama dan pintasan ada di tooltip dan label aksesibel. Petunjuk alat dan pengaturan alat bertumpuk tepat di atas toolbar.
+- Panel Layer: kelompok tampil seperti folder berisi elemen di dalamnya, urutan dari atas sama dengan tumpukan di kanvas. Isi kelompok mengikuti posisi di kanvas, bukan relasi tersimpan. Ikon mata dan gembok hanya muncul saat hover, dan tetap terlihat saat aktif.
+- Panel Properti dibagi per bagian dengan judul kecil `muted` dan garis tipis: Posisi dan ukuran, isi khusus per jenis elemen, Tag, Sambungan, Susun, lalu Hapus paling bawah.
 - Foto di kartu bisa "Isi kartu" (dipotong mengikuti titik fokus yang dipilih) atau "Utuh". Foto dibuka penuh lewat klik dua kali, tombol perbesar di pojok kartu, atau "Lihat foto penuh" di panel.
 - Latar titik pada kanvas ikut bergeser dan membesar: penanda bahwa area itu bisa digeser dan di-zoom. Titik tidak dipakai di halaman lain.
 - Alat aktif memakai aksen (status "dipilih"). Kartu terpilih memakai border `ink` 2px.
 - Kartu palet memakai `BrandingCard` dari 21st.dev (`components/ui/color-palette.tsx`) tanpa animasi masuk, tanpa efek melayang saat hover, dan tanpa label kapital berjarak lebar. "Aa" ditulis dengan warna tergelap palet bila kontrasnya di atas putih minimal 3:1.
 - Pemilih warna memakai Cromia dari 21st.dev (`components/ui/cromia-color-picker.tsx`, dibungkus `components/color-field.tsx`). Tanpa kanal alpha karena warna palet disimpan sebagai hex 6 digit; warna cepat diambil dari palet lain di papan yang sama.
-- Semua aksi punya jalur keyboard lewat panel kanan: daftar kartu, menyambung lewat pilihan kartu, tombol panah untuk menggeser.
+- Semua aksi punya jalur keyboard: daftar elemen di panel Layer, menyambung lewat pilihan kartu di panel Properti, angka X/Y/L/T, tombol panah untuk menggeser, Ctrl+G dan Ctrl+Shift+G untuk kelompok, Ctrl+] dan Ctrl+[ untuk urutan lapisan.
 - Tag bawaan hanya saran. Anggota bisa menambah tag sendiri; tag yang tidak dipakai kartu mana pun hilang dari daftar.
 - Simpan otomatis 800ms setelah perubahan. Bila anggota lain sudah menyimpan papan yang sama, simpanan ditolak dan pengguna diminta memuat ulang, bukan ditimpa diam-diam.
 
