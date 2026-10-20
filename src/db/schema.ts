@@ -456,9 +456,12 @@ export const cateringPlan = pgTable(
 
 /* ---------- Moodboard ---------- */
 
+// Satu foto atau video di kartu media (impor dari link). w dan h ukuran asli, untuk rasio kartu.
+export type MoodMedia = { fileId: string; kind: "image" | "video"; w?: number; h?: number };
+
 export type MoodNode = {
   id: string;
-  type: "photo" | "note" | "palette" | "text" | "shape" | "draw";
+  type: "photo" | "note" | "palette" | "text" | "shape" | "draw" | "media";
   x: number;
   y: number;
   // Ukuran bebas setelah di-resize. Kosong = ukuran bawaan tipe kartu.
@@ -487,6 +490,9 @@ export type MoodNode = {
   points?: number[];
   vw?: number;
   vh?: number;
+  // Kartu media: link asal (Instagram, Pinterest, dll.) dan isinya. Lebih dari satu = carousel.
+  url?: string;
+  media?: MoodMedia[];
 };
 export type MoodEdge = { id: string; from: string; to: string; label: string };
 export type MoodGroup = { id: string; x: number; y: number; w: number; h: number; title: string; color: string };

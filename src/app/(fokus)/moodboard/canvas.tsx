@@ -7,8 +7,10 @@ import {
   ChevronLeft,
   Circle,
   Eraser,
+  ExternalLink,
   Hand,
   Image as ImageIcon,
+  Link2,
   Minus,
   MousePointer2,
   NotebookPen,
@@ -25,7 +27,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import type { MoodData, MoodEdge, MoodGroup, MoodNode } from "@/db/schema";
+import type { MoodData, MoodEdge, MoodGroup, MoodMedia, MoodNode } from "@/db/schema";
 import { setMoodboardShare } from "@/actions/moodboard";
 import {
   applyOps,
@@ -38,6 +40,8 @@ import {
   type MoodMoving,
   type MoodOp,
   type MoodRect,
+  presenceColor,
+  sourceName,
   toSet,
 } from "@/lib/moodboard";
 import { cx, Input, Textarea } from "@/components/kit";
@@ -55,6 +59,9 @@ import {
   insideRect,
   isCard,
   isStroke,
+  MEDIA_FOOTER,
+  MediaCard,
+  mediaRatio,
   NoteCard,
   overlaps,
   PaletteCard,
@@ -92,6 +99,8 @@ type Draft =
   | null;
 // Foto yang sedang diunggah. Foto baru belum masuk papan (belum ada fileId), jadi tampil sebagai kartu sementara.
 type Upload = { board: string; node: MoodNode; url: string };
+// Link yang sedang diambil server, tampil sebagai kartu sementara di tempat kartu medianya nanti.
+type Pending = { board: string; x: number; y: number; source: string };
 
 const PHOTO_MIME = ["image/jpeg", "image/png", "image/webp"];
 const MAX_PHOTO = 10 * 1024 * 1024;
@@ -107,10 +116,15 @@ const MIN_SIZE: Record<string, { w: number; h: number }> = {
   text: { w: 60, h: 10 },
   shape: { w: 8, h: 8 },
   draw: { w: 8, h: 8 },
+  media: { w: 140, h: 140 },
   group: { w: 240, h: 140 },
 };
-const TYPE_LABEL: Record<string, string> = { photo: "Foto", note: "Catatan", palette: "Palet", text: "Teks", shape: "Bentuk", draw: "Gambar" };
-const PANEL_LABEL: Record<string, string> = { photo: "Foto referensi", note: "Catatan", palette: "Palet warna", text: "Teks", shape: "Bentuk", draw: "Gambar pena" };
+const TYPE_LABEL: Record<string, string> = { photo: "Foto", note: "Catatan", palette: "Palet", text: "Teks", shape: "Bentuk", draw: "Gambar", media: "Link" };
+const PANEL_LABEL: Record<string, string> = { photo: "Foto referensi", note: "Catatan", palette: "Palet warna", text: "Teks", shape: "Bentuk", draw: "Gambar pena", media: "Dari link" };
+// Kartu media baru: lebar bawaan, dan tinggi foto paling besar supaya foto yang sangat tinggi tidak memenuhi layar.
+const MEDIA_W = { portrait: 260, landscape: 320 };
+const MEDIA_MAX_H = 520;
+const isLink = (t: string) => /^https?:\/\/\S+$/i.test(t);
 const SHAPES: { k: ShapeKind; name: string; icon: React.ReactNode }[] = [
   { k: "rect", name: "Kotak", icon: <Square size={18} aria-hidden="true" /> },
   { k: "ellipse", name: "Lingkaran", icon: <Circle size={18} aria-hidden="true" /> },
@@ -120,6 +134,32 @@ const SHAPES: { k: ShapeKind; name: string; icon: React.ReactNode }[] = [
 const SAVE_TEXT = { saved: "Tersimpan", saving: "Menyimpan…", error: "Ada yang gagal disimpan", offline: "Offline, mencoba lagi…" };
 
 const uid = () => crypto.randomUUID();
+
+/** Ukuran asli foto atau video dari server, untuk link yang tidak menyebut ukurannya. */
+function naturalSize(src: string, kind: MoodMedia["kind"]) {
+  return new Promise<{ w: number; h: number }>((resolve) => {
+    const done = (w: number, h: number) => resolve(w && h ? { w, h } : { w: 4, h: 5 });
+    if (kind === "video") {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => done(v.videoWidth, v.videoHeight);
+      v.onerror = () => done(0, 0);
+      v.src = src;
+    } else {
+      const i = new Image();
+      i.onload = () => done(i.naturalWidth, i.naturalHeight);
+      i.onerror = () => done(0, 0);
+      i.src = src;
+    }
+    setTimeout(() => done(0, 0), 15_000);
+  });
+}
+
+/** Kursor sendiri saat ada anggota lain di papan: panah berwarna sama dengan yang mereka lihat. */
+function cursorCss(color: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="24" viewBox="0 0 18 20"><path d="M1.5 1.5 L16 10.2 L9.4 11.6 L6 18.2 Z" fill="${color}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 2 2, default`;
+}
 const r1 = (v: number) => Math.round(v);
 function nodeLabel(n: MoodNode) {
   if (n.type === "draw") return "Goresan pena";
@@ -142,10 +182,12 @@ export function MoodboardCanvas({
   initial,
   initialRev,
   initialShare,
+  me,
 }: {
   initial: Record<MoodBoardId, MoodData>;
   initialRev: Record<MoodBoardId, number>;
   initialShare: Record<MoodBoardId, string | null>;
+  me: { id: string; name: string };
 }) {
   const [notice, setNotice] = useState("");
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,6 +212,9 @@ export function MoodboardCanvas({
   const [editing, setEditing] = useState<string | null>(null);
   const [following, setFollowing] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Record<string, Upload>>({});
+  const [imports, setImports] = useState<Record<string, Pending>>({});
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
   const [spaceDown, setSpaceDown] = useState(false);
   const [linkTarget, setLinkTarget] = useState("");
   const [newTag, setNewTag] = useState("");
@@ -189,6 +234,11 @@ export function MoodboardCanvas({
   const history = useRef<History>({});
   // Isi papan terbaru tanpa menunggu render, supaya beberapa perubahan beruntun dihitung dari keadaan yang benar.
   const boardsRef = useRef(boards);
+  // Papan yang sedang dibuka, untuk pekerjaan yang selesai belakangan (impor link) setelah pindah papan.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     boardsRef.current = boards;
@@ -500,6 +550,44 @@ export function MoodboardCanvas({
   }
   const photoSrc = (n: MoodNode) => uploads[n.id]?.url ?? (n.fileId ? `/api/files/${n.fileId}` : null);
   const ghosts = Object.values(uploads).filter((u) => u.board === active && !byId.has(u.node.id));
+  const mediaSrc = (fileId: string) => `/api/files/${fileId}`;
+
+  /* ---------- Link: Instagram, Pinterest, dll. ---------- */
+
+  /**
+   * Server mengunduh foto dan video dari link, lalu kartu media ditaruh dengan rasio foto pertama
+   * supaya tidak ada yang terpotong. Selama menunggu, kartu sementara tampil di tempat yang sama.
+   */
+  async function importLink(url: string, at?: { x: number; y: number }) {
+    const boardId = active;
+    const pending = Object.values(imports).filter((p) => p.board === boardId).length;
+    if (raw.nodes.length + pending >= MOOD_LIMITS.nodes) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.nodes} elemen.`);
+    const id = uid();
+    const pos = at ?? freeSpot(MEDIA_W.portrait, 312);
+    setImports((p) => ({ ...p, [id]: { board: boardId, ...pos, source: sourceName(url) } }));
+    try {
+      const res = await fetch("/api/moodboard/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Link ini tidak bisa diambil.");
+      const media = data.items as MoodMedia[];
+      const first = media[0];
+      if (!first.w || !first.h) Object.assign(first, await naturalSize(mediaSrc(first.fileId), first.kind));
+      const ratio = first.h! / first.w!;
+      const w = Math.max(MIN_SIZE.media.w, Math.round(Math.min(ratio < 1 ? MEDIA_W.landscape : MEDIA_W.portrait, MEDIA_MAX_H / ratio)));
+      const item: MoodNode = { id, type: "media", title: data.title ?? "", tags: [], url, media, x: pos.x, y: pos.y, w, h: Math.round(w * ratio) + MEDIA_FOOTER };
+      commit([{ t: "put", c: "nodes", item }], undefined, boardId);
+      if (boardId === activeRef.current) setSel({ kind: "node", ids: [id] });
+    } catch (e) {
+      flash(e instanceof Error && e.message !== "Failed to fetch" ? e.message : "Link belum terambil. Periksa koneksi lalu coba lagi.");
+    } finally {
+      setImports((p) => {
+        const next = { ...p };
+        delete next[id];
+        return next;
+      });
+    }
+  }
+  const importGhosts = Object.entries(imports).filter(([, p]) => p.board === active);
 
   /* ---------- Pointer ---------- */
 
@@ -599,7 +687,7 @@ export function MoodboardCanvas({
     if (dbl) {
       lastTap.current = null;
       if (n.type === "text") return startEdit();
-      if (n.type === "photo" && photoSrc(n)) {
+      if ((n.type === "photo" && photoSrc(n)) || n.type === "media") {
         setSel({ kind: "node", ids: [n.id] });
         return setViewer(n.id);
       }
@@ -655,6 +743,14 @@ export function MoodboardCanvas({
     const dy = py - d.y0;
     let w = d.r.w + (d.corner.includes("e") ? dx : -dx);
     let h = d.r.h + (d.corner.includes("s") ? dy : -dy);
+    if (n?.type === "media") {
+      // Kartu media selalu mengikuti rasio foto pertama, jadi foto tetap utuh tanpa sisa latar.
+      const ratio = mediaRatio(n);
+      if (Math.abs(h - d.r.h) > Math.abs(w - d.r.w)) w = (h - MEDIA_FOOTER) / ratio;
+      w = Math.max(min.w, r1(w));
+      h = r1(w * ratio) + MEDIA_FOOTER;
+      return { x: d.corner.includes("w") ? d.r.x + d.r.w - w : d.r.x, y: d.corner.includes("n") ? d.r.y + d.r.h - h : d.r.y, w, h };
+    }
     if (n?.type === "text") h = d.r.h;
     else if (keepRatio) {
       const ratio = d.r.w / d.r.h;
@@ -905,6 +1001,29 @@ export function MoodboardCanvas({
     };
   }, []);
 
+  // Tempel (Ctrl+V) di kanvas: link jadi kartu media, gambar dari clipboard jadi foto.
+  const pasteRef = useRef<(e: ClipboardEvent) => void>(() => {});
+  useEffect(() => {
+    pasteRef.current = (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest?.("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
+      const files = Array.from(e.clipboardData?.files ?? []);
+      const text = e.clipboardData?.getData("text/plain").trim() ?? "";
+      if (files.length) {
+        e.preventDefault();
+        addPhotos(files);
+      } else if (isLink(text)) {
+        e.preventDefault();
+        void importLink(text);
+      }
+    };
+  });
+  useEffect(() => {
+    const paste = (e: ClipboardEvent) => pasteRef.current(e);
+    window.addEventListener("paste", paste);
+    return () => window.removeEventListener("paste", paste);
+  }, []);
+
   /* ---------- Teks: ukur tinggi, isian langsung di kanvas ---------- */
 
   const observer = useRef<ResizeObserver | null>(null);
@@ -951,11 +1070,13 @@ export function MoodboardCanvas({
 
   /* ---------- Render ---------- */
 
-  const isEmpty = b.nodes.length === 0 && b.groups.length === 0 && !ghosts.length;
+  const isEmpty = b.nodes.length === 0 && b.groups.length === 0 && !ghosts.length && !importGhosts.length;
   const grid = 20 * zoom;
   const st = sync.state;
   const cursor =
     spaceDown || tool === "hand" ? "cursor-grab active:cursor-grabbing" : tool === "select" ? "cursor-default" : tool === "text" ? "cursor-text" : "cursor-crosshair";
+  // Ada anggota lain di papan ini: kursor sendiri ikut berwarna, sama seperti yang mereka lihat.
+  const ownCursor = peers.length > 0 && tool === "select" && !spaceDown ? cursorCss(presenceColor(me.id)) : undefined;
   const linkFrom = draft?.kind === "link" ? byId.get(draft.from) : undefined;
   const linkD = draft?.kind === "link" && linkFrom ? curve(box(linkFrom), { x: draft.x, y: draft.y, w: 0, h: 0 }).d : "";
   const toolHint =
@@ -1102,6 +1223,9 @@ export function MoodboardCanvas({
           onDrop={(e) => {
             e.preventDefault();
             const p = world(e.clientX, e.clientY);
+            // Link yang diseret dari tab browser lain jadi kartu media.
+            const link = (e.dataTransfer.getData("text/uri-list").split("\n").find((l) => l && !l.startsWith("#")) ?? e.dataTransfer.getData("text/plain")).trim();
+            if (!e.dataTransfer.files.length && isLink(link)) return void importLink(link, { x: r1(p.x - 130), y: r1(p.y - 150) });
             addPhotos(e.dataTransfer.files, { x: r1(p.x - 120), y: r1(p.y - 100) });
           }}
           className={cx(
@@ -1113,6 +1237,7 @@ export function MoodboardCanvas({
             backgroundImage: "radial-gradient(#cfced9 1px, transparent 1.3px)",
             backgroundSize: `${grid}px ${grid}px`,
             backgroundPosition: `${pan.x}px ${pan.y}px`,
+            cursor: ownCursor,
           }}
         >
           <div className="absolute left-0 top-0 size-px origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
@@ -1229,6 +1354,7 @@ export function MoodboardCanvas({
                       />
                     ))}
                   {n.type === "photo" && <PhotoCard n={n} src={photoSrc(n)} uploading={!!uploads[n.id]} showOpen={single} onOpen={() => setViewer(n.id)} />}
+                  {n.type === "media" && <MediaCard n={n} src={mediaSrc} swipe={single && tool === "select"} showOpen={single} onOpen={() => setViewer(n.id)} />}
                   {n.type === "note" && <NoteCard n={n} />}
                   {n.type === "palette" && <PaletteCard n={n} />}
                   {n.type === "text" &&
@@ -1273,6 +1399,19 @@ export function MoodboardCanvas({
                 style={{ left: u.node.x, top: u.node.y, width: 240, height: 222 }}
               >
                 <PhotoCard n={u.node} src={u.url} uploading showOpen={false} onOpen={() => {}} />
+              </div>
+            ))}
+
+            {importGhosts.map(([id, p]) => (
+              <div
+                key={id}
+                className="pointer-events-none absolute box-border flex flex-col overflow-hidden rounded-[18px] border-2 border-line bg-surface"
+                style={{ left: p.x, top: p.y, width: MEDIA_W.portrait, height: 312 }}
+              >
+                <div className="flex-1 animate-pulse bg-[#e8e7ef]" />
+                <div className="flex items-center px-3 text-[12px] font-semibold text-muted" style={{ height: MEDIA_FOOTER }}>
+                  Mengambil dari {p.source}…
+                </div>
               </div>
             ))}
 
@@ -1326,7 +1465,7 @@ export function MoodboardCanvas({
               <div className="pointer-events-auto flex max-w-[380px] flex-col items-start gap-2 rounded-[20px] border-[1.5px] border-dashed border-outline bg-surface px-7 py-6">
                 <p className="text-[16px] font-extrabold">Papan {boardName} masih kosong</p>
                 <p className="text-[13px] leading-[1.5] text-muted">
-                  Seret foto referensi dari komputer ke sini, atau pakai Unggah foto. Mau mulai dari kerangka? Buat kelompok Dekor, Busana, dan Warna lalu isi satu per satu.
+                  Seret foto referensi dari komputer ke sini, atau tempel link Instagram dan Pinterest dengan Ctrl+V. Mau mulai dari kerangka? Buat kelompok Dekor, Busana, dan Warna lalu isi satu per satu.
                 </p>
                 <button
                   type="button"
@@ -1400,6 +1539,40 @@ export function MoodboardCanvas({
                 }}
               />
             </label>
+            <Popover open={linkOpen} onOpenChange={setLinkOpen}>
+              <PopoverTrigger
+                title="Tambah dari link"
+                aria-label="Tambah dari link Instagram, Pinterest, atau situs lain"
+                className={cx(TOOL_CLASS, linkOpen ? "bg-accent text-ink" : "hover:bg-ground")}
+              >
+                <Link2 size={18} aria-hidden="true" />
+                <span className={TOOL_LABEL}>Link</span>
+              </PopoverTrigger>
+              <PopoverContent side="right" align="start" className="w-[320px] p-3">
+                <form
+                  className="flex flex-col gap-2.5"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const u = linkUrl.trim();
+                    if (!isLink(u)) return flash("Itu bukan link. Salin alamat lengkap yang diawali https://.");
+                    void importLink(u);
+                    setLinkUrl("");
+                    setLinkOpen(false);
+                  }}
+                >
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-[12px] font-semibold text-muted">Link foto atau video</span>
+                    <Input autoFocus type="url" inputMode="url" value={linkUrl} placeholder="https://www.instagram.com/p/…" onChange={(e) => setLinkUrl(e.target.value)} />
+                  </label>
+                  <p className="text-[12px] leading-[1.5] text-muted">
+                    Postingan Instagram, Pin Pinterest, atau halaman lain. Carousel jadi satu kartu, video bisa diputar. Bisa juga langsung Ctrl+V di kanvas.
+                  </p>
+                  <button type="submit" disabled={!linkUrl.trim()} className="h-11 rounded-xl bg-ink text-[13px] font-bold text-white hover:bg-[#2e2d40] disabled:opacity-60">
+                    Tambahkan ke papan
+                  </button>
+                </form>
+              </PopoverContent>
+            </Popover>
             <ToolButton label="Catatan" hint="Tambah catatan" onClick={() => addNode({ type: "note", title: "Catatan baru", text: "" })} icon={<NotebookPen size={18} aria-hidden="true" />} />
             <ToolButton
               label="Warna"
@@ -1513,6 +1686,25 @@ export function MoodboardCanvas({
                     }}
                   />
                 </label>
+              )}
+              {selNode.type === "media" && selNode.url && (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[12px] font-semibold text-muted">Sumber</span>
+                  <a
+                    href={selNode.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-11 min-w-0 items-center gap-2 rounded-xl border border-outline px-3 text-[13px] font-bold no-underline hover:bg-sunken"
+                  >
+                    <ExternalLink size={16} className="shrink-0" aria-hidden="true" />
+                    <span className="truncate">Buka di {sourceName(selNode.url)}</span>
+                  </a>
+                  {(selNode.media?.length ?? 0) > 1 && (
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      {selNode.media!.length} foto dan video. Geser foto di kartu ke kiri atau kanan, atau pakai tombol panah. Pindahkan kartu lewat judulnya.
+                    </p>
+                  )}
+                </div>
               )}
               {selNode.type === "palette" && (
                 <fieldset className="flex flex-col gap-2">
@@ -1711,7 +1903,10 @@ export function MoodboardCanvas({
                   Tarik elemen untuk memindah. Tarik area kosong untuk memilih beberapa sekaligus. Geser kanvas dengan alat Tangan, tahan Spasi, atau satu jari di tablet. Ctrl dan scroll, atau cubit dua jari, untuk zoom.
                 </Help>
                 <Help title="Gambar dan tulis">Pena untuk coretan bebas, Bentuk untuk kotak, lingkaran, garis, dan panah, Teks untuk tulisan dengan pilihan font termasuk tulisan tangan.</Help>
-                <Help title="Bersama">Kursor anggota lain terlihat dengan namanya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
+                <Help title="Dari link">
+                  Tempel link Instagram, Pinterest, atau situs lain dengan Ctrl+V di kanvas, atau pakai alat Link. Foto tidak terpotong, carousel jadi satu kartu, dan video bisa diputar.
+                </Help>
+                <Help title="Bersama">Kursor anggota lain terlihat dengan nama di bawahnya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
                 <Help title="Keyboard">
                   V Pilih, H Tangan, C Sambung, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
                 </Help>
@@ -1720,7 +1915,13 @@ export function MoodboardCanvas({
           )}
         </aside>
       </div>
-      <PhotoViewer photos={b.nodes.filter((n) => n.type === "photo" && photoSrc(n))} openId={viewer} onChange={setViewer} src={photoSrc} />
+      <PhotoViewer
+        photos={b.nodes.filter((n) => (n.type === "photo" && photoSrc(n)) || n.type === "media")}
+        openId={viewer}
+        onChange={setViewer}
+        src={photoSrc}
+        mediaSrc={mediaSrc}
+      />
       <Modal open={shareOpen} onClose={() => setShareOpen(false)} title={`Bagikan papan ${boardName}`} description="Untuk dekorator, MUA, atau vendor lain yang perlu melihat konsep tanpa membuat akun.">
         <div className="flex flex-col gap-3">
           {share[active] ? (

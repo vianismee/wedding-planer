@@ -3,10 +3,10 @@
 // Tampilan elemen papan yang dipakai editor moodboard dan halaman baca-saja untuk vendor (/m/[token]).
 // Tidak ada logika edit di sini: editor membungkus komponen ini dengan pegangan dan event pointer.
 
-import type { PointerEvent as ReactPointerEvent } from "react";
-import { ChevronLeft, ChevronRight, ExternalLink, Maximize2 } from "lucide-react";
-import type { MoodData, MoodEdge, MoodNode } from "@/db/schema";
-import { MOOD_FONTS, type MoodFont, type MoodRect } from "@/lib/moodboard";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ChevronLeft, ChevronRight, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import type { MoodData, MoodEdge, MoodMedia, MoodNode } from "@/db/schema";
+import { MOOD_FONTS, sourceName, type MoodFont, type MoodRect } from "@/lib/moodboard";
 import { cx } from "@/components/kit";
 import { Modal } from "@/components/forms";
 import { BrandingCard } from "@/components/ui/color-palette";
@@ -19,13 +19,24 @@ export const DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   text: { w: 240, h: 40 },
   shape: { w: 160, h: 120 },
   draw: { w: 40, h: 40 },
+  media: { w: 260, h: 312 },
 };
+
+// Tinggi baris judul di bawah foto kartu media. Sisa tinggi kartu mengikuti rasio foto pertama.
+export const MEDIA_FOOTER = 52;
+/** Tinggi dibagi lebar foto atau video pertama di kartu media. */
+export function mediaRatio(n: MoodNode) {
+  const m = n.media?.[0];
+  return m?.w && m.h ? m.h / m.w : 1;
+}
 
 /** Kotak elemen di koordinat papan. Tinggi teks mengikuti isinya, jadi diukur dari DOM bila ada. */
 export function boxOf(n: MoodNode, textH?: number): MoodRect {
   const d = DEFAULT_SIZE[n.type] ?? DEFAULT_SIZE.shape;
+  const w = n.w ?? d.w;
+  if (n.type === "media") return { x: n.x, y: n.y, w, h: n.h ?? Math.round(w * mediaRatio(n)) + MEDIA_FOOTER };
   const h = n.type === "text" ? (textH ?? n.h ?? Math.round((n.fontSize ?? 24) * 1.3)) : (n.h ?? d.h);
-  return { x: n.x, y: n.y, w: n.w ?? d.w, h };
+  return { x: n.x, y: n.y, w, h };
 }
 
 export function insideRect(b: MoodRect, g: MoodRect) {
@@ -70,7 +81,7 @@ export function curve(a: MoodRect, b: MoodRect) {
 }
 
 /** Elemen yang dipakai sebagai kartu (bisa disambung, punya judul dan tag). */
-export const isCard = (n: MoodNode) => n.type === "photo" || n.type === "note" || n.type === "palette";
+export const isCard = (n: MoodNode) => n.type === "photo" || n.type === "note" || n.type === "palette" || n.type === "media";
 /** Elemen yang hanya bisa dipilih lewat garisnya, bukan lewat kotak pembatasnya. */
 export const isStroke = (n: MoodNode) => n.type === "draw" || (n.type === "shape" && (n.shape === "line" || n.shape === "arrow"));
 
@@ -162,6 +173,176 @@ export function PhotoCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Kartu dari link (Instagram, Pinterest, dll.). Foto tampil utuh tanpa terpotong; kartu dibuat dengan
+ * rasio foto pertama, isi carousel lain yang rasionya berbeda diberi latar. Carousel bisa digeser ke
+ * kiri dan kanan saat `swipe` aktif (di editor: setelah kartu dipilih, supaya kartu tetap bisa
+ * dipindah), atau lewat tombol panah. Video diputar langsung di kartu.
+ */
+export function MediaCard({
+  n,
+  src,
+  swipe,
+  showOpen,
+  onOpen,
+}: {
+  n: MoodNode;
+  src: (fileId: string) => string;
+  swipe: boolean;
+  showOpen: boolean;
+  onOpen: () => void;
+}) {
+  const items = n.media ?? [];
+  const [index, setIndex] = useState(0);
+  const [dx, setDx] = useState(0);
+  const start = useRef<{ x: number; id: number; scale: number } | null>(null);
+  const cur = Math.min(index, items.length - 1);
+  const many = items.length > 1;
+  const go = (d: number) => setIndex(Math.max(0, Math.min(items.length - 1, cur + d)));
+  const stop = (e: ReactPointerEvent) => e.stopPropagation();
+  const end = (e: ReactPointerEvent) => {
+    const s = start.current;
+    if (s?.id !== e.pointerId) return;
+    start.current = null;
+    setDx(0);
+    const d = (e.clientX - s.x) / s.scale;
+    if (Math.abs(d) > 40) go(d < 0 ? 1 : -1);
+  };
+  const reveal = showOpen ? "opacity-100" : "opacity-0 group-hover/node:opacity-100 focus-visible:opacity-100";
+  const arrow = cx(
+    "absolute top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface/90 text-ink shadow-bar transition-opacity duration-150 hover:bg-surface",
+    reveal,
+  );
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl">
+      <div
+        className="relative min-h-0 flex-1 overflow-hidden bg-[#e8e7ef]"
+        onPointerDown={
+          swipe && many
+            ? (e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                const el = e.currentTarget;
+                el.setPointerCapture(e.pointerId);
+                // Kartu bisa sedang di-zoom: jarak geser dihitung di ukuran kartu, bukan ukuran layar.
+                start.current = { x: e.clientX, id: e.pointerId, scale: el.getBoundingClientRect().width / el.offsetWidth || 1 };
+              }
+            : undefined
+        }
+        onPointerMove={(e) => {
+          const s = start.current;
+          if (s?.id === e.pointerId) setDx((e.clientX - s.x) / s.scale);
+        }}
+        onPointerUp={end}
+        onPointerCancel={end}
+      >
+        <div className={cx("flex h-full", !dx && "transition-transform duration-200 ease-out")} style={{ transform: `translateX(calc(${-cur * 100}% + ${dx}px))` }}>
+          {items.map((m, j) => (
+            <div key={m.fileId} className="relative h-full w-full shrink-0">
+              {m.kind === "video" ? (
+                <MediaVideo src={src(m.fileId)} active={j === cur} />
+              ) : (
+                // Foto dari penyimpanan privat lewat route berizin, jadi tidak lewat optimasi next/image.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={src(m.fileId)} alt={`${n.title} ${j + 1}`} draggable={false} loading={j === 0 ? undefined : "lazy"} className="pointer-events-none block size-full object-contain" />
+              )}
+            </div>
+          ))}
+        </div>
+        {many && (
+          <>
+            <span className="pointer-events-none absolute left-2 top-2 rounded-md bg-ink/80 px-1.5 py-[2px] text-[11px] font-bold tabular text-white">
+              {cur + 1}/{items.length}
+            </span>
+            {cur > 0 && (
+              <button type="button" aria-label="Sebelumnya" onPointerDown={stop} onClick={() => go(-1)} className={cx(arrow, "left-1.5")}>
+                <ChevronLeft size={16} aria-hidden="true" />
+              </button>
+            )}
+            {cur < items.length - 1 && (
+              <button type="button" aria-label="Berikutnya" onPointerDown={stop} onClick={() => go(1)} className={cx(arrow, "right-1.5")}>
+                <ChevronRight size={16} aria-hidden="true" />
+              </button>
+            )}
+            <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center gap-1" aria-hidden="true">
+              {items.slice(0, 12).map((m, j) => (
+                <span key={m.fileId} className={cx("size-1.5 rounded-full shadow-[0_0_2px_rgba(0,0,0,0.5)]", j === cur ? "bg-white" : "bg-white/50")} />
+              ))}
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          aria-label={`Lihat ${n.title || "media"} penuh`}
+          title="Lihat penuh (atau klik dua kali kartu)"
+          onPointerDown={stop}
+          onClick={onOpen}
+          className={cx("absolute right-2 top-2 flex size-8 items-center justify-center rounded-lg bg-ink/80 text-white transition-opacity duration-150 hover:bg-ink", reveal)}
+        >
+          <Maximize2 size={15} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="flex min-w-0 shrink-0 flex-col justify-center gap-0.5 px-3" style={{ height: MEDIA_FOOTER }}>
+        <div className="truncate text-[13px] font-bold leading-[1.4]">{n.title || "Tanpa judul"}</div>
+        <div className="truncate text-[11px] font-semibold text-muted">
+          {sourceName(n.url ?? "")}
+          {n.tags.length > 0 && ` · ${n.tags.slice(0, 3).join(", ")}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Video di kartu: tombol putar sendiri, karena kontrol bawaan bentrok dengan geser kartu di kanvas. */
+function MediaVideo({ src, active }: { src: string; active: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    if (!active) ref.current?.pause();
+  }, [active]);
+  const stop = (e: ReactPointerEvent) => e.stopPropagation();
+  return (
+    <>
+      {/* #t=0.1 supaya Safari menampilkan frame pertama sebelum diputar. */}
+      <video
+        ref={ref}
+        src={`${src}#t=0.1`}
+        preload="metadata"
+        playsInline
+        loop
+        muted={muted}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        className="pointer-events-none block size-full object-contain"
+      />
+      <button
+        type="button"
+        aria-label={playing ? "Jeda video" : "Putar video"}
+        onPointerDown={stop}
+        onClick={() => (playing ? ref.current?.pause() : void ref.current?.play().catch(() => {}))}
+        className={cx(
+          "absolute left-1/2 top-1/2 flex size-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-ink/75 text-white transition-opacity duration-150 hover:bg-ink",
+          playing && "opacity-0 group-hover/node:opacity-100 focus-visible:opacity-100",
+        )}
+      >
+        {playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} className="ml-0.5" aria-hidden="true" />}
+      </button>
+      {playing && (
+        <button
+          type="button"
+          aria-label={muted ? "Nyalakan suara" : "Matikan suara"}
+          onPointerDown={stop}
+          onClick={() => setMuted((m) => !m)}
+          className="absolute bottom-2 right-2 flex size-8 items-center justify-center rounded-lg bg-ink/75 text-white hover:bg-ink"
+        >
+          {muted ? <VolumeX size={15} aria-hidden="true" /> : <Volume2 size={15} aria-hidden="true" />}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -292,11 +473,13 @@ export function PhotoViewer({
   openId,
   onChange,
   src,
+  mediaSrc,
 }: {
   photos: MoodNode[];
   openId: string | null;
   onChange: (id: string | null) => void;
   src: (n: MoodNode) => string | null;
+  mediaSrc: (fileId: string) => string;
 }) {
   const i = photos.findIndex((p) => p.id === openId);
   const n = i >= 0 ? photos[i] : null;
@@ -315,10 +498,14 @@ export function PhotoViewer({
             if (e.key === "ArrowRight") go(1);
           }}
         >
-          <div className="flex items-center justify-center overflow-hidden rounded-2xl bg-ground">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            {url && <img src={url} alt={n.title} className="block max-h-[68dvh] w-auto max-w-full object-contain" />}
-          </div>
+          {n.type === "media" ? (
+            <MediaList n={n} src={mediaSrc} />
+          ) : (
+            <div className="flex items-center justify-center overflow-hidden rounded-2xl bg-ground">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {url && <img src={url} alt={n.title} className="block max-h-[68dvh] w-auto max-w-full object-contain" />}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             {n.tags.map((t) => (
               <span key={t} className="rounded-md bg-ground px-2 py-[3px] text-[11px] font-bold">
@@ -326,6 +513,12 @@ export function PhotoViewer({
               </span>
             ))}
             <div className="flex-1" />
+            {n.type === "media" && n.url && (
+              <a href={n.url} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] font-bold no-underline hover:bg-ground">
+                <ExternalLink size={16} aria-hidden="true" />
+                Buka di {sourceName(n.url)}
+              </a>
+            )}
             {n.fileId && url && !url.startsWith("blob:") && (
               <a href={url} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-1.5 rounded-xl px-3 text-[13px] font-bold no-underline hover:bg-ground">
                 <ExternalLink size={16} aria-hidden="true" />
@@ -349,6 +542,25 @@ export function PhotoViewer({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** Isi kartu media di dialog: geser ke samping untuk foto dan video berikutnya, video dengan kontrol bawaan. */
+function MediaList({ n, src }: { n: MoodNode; src: (fileId: string) => string }) {
+  const items: MoodMedia[] = n.media ?? [];
+  return (
+    <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-contain rounded-2xl">
+      {items.map((m, j) => (
+        <div key={m.fileId} className="flex w-full shrink-0 snap-center items-center justify-center overflow-hidden rounded-2xl bg-ground">
+          {m.kind === "video" ? (
+            <video src={src(m.fileId)} controls playsInline preload="metadata" className="block max-h-[68dvh] w-auto max-w-full" />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={src(m.fileId)} alt={`${n.title} ${j + 1}`} className="block max-h-[68dvh] w-auto max-w-full object-contain" />
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

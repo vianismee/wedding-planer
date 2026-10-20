@@ -75,7 +75,7 @@ export async function POST(req: Request) {
   }
 
   emitMood(weddingId, { type: "ops", board, rev, clientId, ops });
-  if (ops.some((o) => o.t === "del" || (o.t === "put" && o.c === "nodes" && o.item.type === "photo") || (o.t === "patch" && "fileId" in o.set)))
+  if (ops.some((o) => o.t === "del" || (o.t === "put" && o.c === "nodes" && (o.item.type === "photo" || o.item.type === "media")) || (o.t === "patch" && ("fileId" in o.set || "media" in o.set))))
     void cleanupPhotos(weddingId);
   return NextResponse.json({ rev });
 }
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
 const lastCleanup = new Map<string, number>();
 
 /**
- * Hapus foto moodboard yang sudah tidak dipakai di papan mana pun. Hanya foto yang lebih dari sehari,
+ * Hapus foto dan video moodboard yang sudah tidak dipakai di papan mana pun. Hanya foto yang lebih dari sehari,
  * supaya unggahan yang belum masuk papan aman, dan paling sering sekali per menit per pernikahan.
  */
 async function cleanupPhotos(weddingId: string) {
@@ -92,7 +92,7 @@ async function cleanupPhotos(weddingId: string) {
   lastCleanup.set(weddingId, now);
   try {
     const boards = await db.select({ data: schema.moodboard.data }).from(schema.moodboard).where(eq(schema.moodboard.weddingId, weddingId));
-    const used = new Set(boards.flatMap((b) => b.data.nodes.map((n) => n.fileId).filter(Boolean)));
+    const used = new Set(boards.flatMap((b) => b.data.nodes.flatMap((n) => [n.fileId, ...(n.media ?? []).map((m) => m.fileId)]).filter(Boolean)));
     const old = await db
       .select({ id: schema.file.id, key: schema.file.key })
       .from(schema.file)

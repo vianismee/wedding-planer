@@ -36,7 +36,7 @@ export default async function MoodboardPage() {
         </LinkButton>
       </section>
       <div className={`hidden h-[calc(100dvh-24px)] min-h-[520px] min-[768px]:block ${moodFontVars}`}>
-        <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} />
+        <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} me={{ id: ctx.user.id, name: ctx.user.name }} />
       </div>
     </>
   );

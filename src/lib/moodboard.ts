@@ -21,7 +21,20 @@ export const MOOD_GROUP_COLORS: Record<string, { bg: string; line: string; name:
   peach: { bg: "rgba(252, 229, 216, 0.7)", line: "#f0c9b3", name: "Peach" },
 };
 
-export const MOOD_LIMITS = { nodes: 300, edges: 600, groups: 40, swatches: 6, tags: 12, points: 2000, text: 5000 };
+export const MOOD_LIMITS = { nodes: 300, edges: 600, groups: 40, swatches: 6, tags: 12, points: 2000, text: 5000, media: 20 };
+
+/** Nama sumber link untuk label kartu media: "Instagram", "Pinterest", atau nama domain. */
+export function sourceName(url: string) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (/(^|\.)instagram\.com$/.test(host)) return "Instagram";
+    if (/(^|\.)pinterest\.[a-z.]+$/.test(host) || host === "pin.it") return "Pinterest";
+    if (/(^|\.)tiktok\.com$/.test(host)) return "TikTok";
+    return host;
+  } catch {
+    return "Link";
+  }
+}
 
 // Font untuk teks di kanvas. Variabel CSS dipasang oleh src/lib/mood-fonts.ts; Plus Jakarta Sans
 // sudah dimuat di root layout. Skrip tulisan tangan ada karena moodboard dipakai untuk mencoba

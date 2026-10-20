@@ -27,6 +27,15 @@ export const nodeSchema = z.discriminatedUnion("type", [
     fit: z.enum(["cover", "contain"]).optional(),
     focus: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) }).optional(),
   }),
+  z.object({
+    ...base,
+    type: z.literal("media"),
+    url: z.url({ protocol: /^https?$/ }).max(2000),
+    media: z
+      .array(z.object({ fileId: z.uuid(), kind: z.enum(["image", "video"]), w: len.optional(), h: len.optional() }))
+      .min(1)
+      .max(MOOD_LIMITS.media),
+  }),
   z.object({ ...base, type: z.literal("note"), text: z.string().max(2000).optional() }),
   z.object({ ...base, type: z.literal("palette"), swatches: z.array(hex).max(MOOD_LIMITS.swatches).optional() }),
   z.object({

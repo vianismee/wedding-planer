@@ -57,6 +57,29 @@ export async function readLocal(key: string) {
   return fs.readFile(localPath(key));
 }
 
+/**
+ * Respons file dari penyimpanan lokal. Mendukung header Range karena video di Safari (iPad)
+ * tidak mau diputar tanpa itu.
+ */
+export async function localResponse(req: Request, f: { key: string; mime: string; name: string }) {
+  const body = await readLocal(f.key);
+  const headers: Record<string, string> = {
+    "Content-Type": f.mime,
+    "Content-Disposition": `inline; filename="${encodeURIComponent(f.name)}"`,
+    "Cache-Control": "private, no-store",
+    "Accept-Ranges": "bytes",
+  };
+  const m = req.headers.get("range")?.match(/^bytes=(\d*)-(\d*)$/);
+  if (m && (m[1] || m[2])) {
+    const size = body.length;
+    const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
+    const end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
+    if (start >= size || start > end) return new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${size}` } });
+    return new Response(new Uint8Array(body.subarray(start, end + 1)), { status: 206, headers: { ...headers, "Content-Range": `bytes ${start}-${end}/${size}` } });
+  }
+  return new Response(new Uint8Array(body), { headers });
+}
+
 export async function deleteObject(key: string) {
   if (s3) {
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));

@@ -18,8 +18,9 @@ const firstName = (name: string) => name.split(/\s+/)[0] || name;
 const boardName = (id: string) => MOOD_BOARDS.find((b) => b.id === id)?.name ?? id;
 
 /**
- * Kursor anggota lain di papan yang sama. Digambar di koordinat layar supaya ukurannya tetap,
- * dan bergerak halus karena kursor dikirim paling cepat tiap 50 ms.
+ * Kursor anggota lain di papan yang sama: panah berwarna dengan nama tepat di bawahnya. Digambar di
+ * koordinat layar supaya ukurannya tetap, dan bergerak halus karena kursor dikirim paling cepat
+ * tiap 50 ms. Muncul dengan animasi singkat saat anggota masuk ke papan.
  */
 export function Cursors({ peers, view }: { peers: MoodPresence[]; view: View }) {
   return (
@@ -31,12 +32,17 @@ export function Cursors({ peers, view }: { peers: MoodPresence[]; view: View }) 
             className="absolute left-0 top-0 transition-transform duration-75 ease-linear"
             style={{ transform: `translate(${view.pan.x + p.cursor.x * view.zoom}px, ${view.pan.y + p.cursor.y * view.zoom}px)` }}
           >
-            <svg width="18" height="20" viewBox="0 0 18 20" className="block">
-              <path d="M1.5 1.5 L16 10.2 L9.4 11.6 L6 18.2 Z" fill={p.color} stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
-            </svg>
-            <span className="ml-3.5 mt-[-2px] block whitespace-nowrap rounded-md px-1.5 py-[2px] text-[11px] font-bold text-white" style={{ background: p.color }}>
-              {firstName(p.name)}
-            </span>
+            <div className="flex origin-top-left flex-col items-start animate-in fade-in zoom-in-50 duration-200">
+              <svg width="22" height="24" viewBox="0 0 18 20" className="-ml-[2px] -mt-[2px] block drop-shadow-[0_1px_1.5px_rgba(0,0,0,0.25)]">
+                <path d="M1.5 1.5 L16 10.2 L9.4 11.6 L6 18.2 Z" fill={p.color} stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+              </svg>
+              <span
+                className="ml-1.5 mt-0.5 block max-w-[160px] truncate rounded-full px-2 py-[3px] text-[11px] font-bold leading-[1.3] text-white shadow-[0_1px_3px_rgba(0,0,0,0.2)]"
+                style={{ background: p.color }}
+              >
+                {p.name}
+              </span>
+            </div>
           </div>
         ) : null,
       )}

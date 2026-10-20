@@ -12,6 +12,7 @@ import {
   EdgeLabel,
   insideRect,
   isCard,
+  MediaCard,
   NoteCard,
   PaletteCard,
   PhotoCard,
@@ -37,7 +38,9 @@ export function MoodboardViewer({ data, token }: { data: MoodData; token: string
   const src = (n: MoodNode) => (n.fileId ? `/m/${token}/foto/${n.fileId}` : null);
   const box = (n: MoodNode) => boxOf(n);
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
-  const photos = data.nodes.filter((n) => n.type === "photo" && n.fileId);
+  const mediaSrc = (fileId: string) => `/m/${token}/foto/${fileId}`;
+  const photos = data.nodes.filter((n) => (n.type === "photo" && n.fileId) || n.type === "media");
+  const opens = (n: MoodNode) => (n.type === "photo" && !!n.fileId) || n.type === "media";
 
   function fit() {
     const r = contentBounds(data, box);
@@ -162,16 +165,17 @@ export function MoodboardViewer({ data, token }: { data: MoodData; token: string
             return (
               <div
                 key={n.id}
-                data-photo={n.type === "photo" && n.fileId ? n.id : undefined}
+                data-photo={opens(n) ? n.id : undefined}
                 className={cx(
                   "group/node absolute box-border",
                   card && "rounded-[18px] border-2",
                   card && (n.type === "note" ? "border-[#ebddba] bg-note-bg" : "border-line bg-surface"),
-                  n.type === "photo" && n.fileId && "cursor-zoom-in",
+                  opens(n) && "cursor-zoom-in",
                 )}
                 style={{ left: n.x, top: n.y, width: r.w, height: n.type === "text" ? undefined : r.h }}
               >
                 {n.type === "photo" && <PhotoCard n={n} src={src(n)} showOpen={false} onOpen={() => setViewer(n.id)} />}
+                {n.type === "media" && <MediaCard n={n} src={mediaSrc} swipe showOpen={false} onOpen={() => setViewer(n.id)} />}
                 {n.type === "note" && <NoteCard n={n} />}
                 {n.type === "palette" && <PaletteCard n={n} />}
                 {n.type === "text" && <TextBody n={n} />}
@@ -201,7 +205,7 @@ export function MoodboardViewer({ data, token }: { data: MoodData; token: string
         </button>
       </div>
 
-      <PhotoViewer photos={photos} openId={viewer} onChange={setViewer} src={src} />
+      <PhotoViewer photos={photos} openId={viewer} onChange={setViewer} src={src} mediaSrc={mediaSrc} />
     </div>
   );
 }
