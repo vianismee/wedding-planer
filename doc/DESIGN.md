@@ -193,11 +193,11 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 ### Perbandingan penawaran (pola khusus)
 
 - Satu calon vendor dicatat sekali (kontak, ketersediaan, DP bawaan) dan punya beberapa paket. Paket boleh punya DP sendiri.
-- Setiap calon vendor tampil sebagai satu kartu berisi tabel paketnya berdampingan: kolom = paket, baris = harga, pembayaran, isi paket, add-on. Paket satu vendor tidak dipecah jadi kartu terpisah. Kolom label menempel di kiri saat tabel digeser.
-- Isi paket dicocokkan antar kolom (huruf besar, spasi, dan tanda baca di ujung diabaikan). Isi yang sama di semua paket dilipat jadi satu baris yang bisa dibuka; yang berbeda tampil dengan latar `ground`. Menyalin paket menjaga teks isinya sama supaya pencocokan akurat.
-- Paket dari beberapa vendor dalam satu kategori bisa dicentang (maksimal 4) lalu dibandingkan dalam tabel yang sama di dialog lebar.
+- Setiap calon vendor tampil sebagai satu kartu. Paketnya berupa baris ringkas (nama, total, jumlah isi, beda singkat seperti "+E"), bukan tabel. "Lihat isi paket" membuka detail tiap paket sebagai blok berjajar: rincian harga, DP, dan isi.
+- Isi paket dicocokkan antar paket (huruf besar, spasi, dan tanda baca di ujung diabaikan). Di detail, isi yang tidak dimiliki semua paket ditandai "+", dan isi paket lain yang tidak termasuk ditulis pudar di bawahnya. Menyalin paket menjaga teks isinya sama supaya pencocokan akurat.
+- Paket dari beberapa vendor dalam satu kategori bisa dicentang (maksimal 4) lalu dibandingkan sebagai blok detail berjajar di dialog lebar.
 - Selisih terhadap alokasi budget dihitung otomatis dan diberi warna: hijau bila di bawah alokasi, oranye-coklat bila di atas. Hanya tampil untuk yang boleh melihat Budget.
-- Label "Termurah" juga dihitung, bukan ditulis tangan. Paket yang sudah dipesan diberi label "Dipesan" di kepala kolomnya.
+- Label "Termurah" juga dihitung, bukan ditulis tangan. Paket yang sudah dipesan diberi label "Dipesan".
 
 ### Moodboard (pola khusus)
 

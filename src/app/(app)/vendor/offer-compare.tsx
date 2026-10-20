@@ -2,7 +2,7 @@
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useActionState, useMemo, useState } from "react";
-import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, Copy, Pencil, Plus, Trash2, X } from "lucide-react";
 import { addPackage, addProspect, cancelOffer, chooseOffer, deletePackage, deleteProspect, duplicatePackage, trackCompare, updatePackage, updateProspect } from "@/actions/vendor";
 import { ActionButton, FormDialog, Modal, type ActionResult, submitWith } from "@/components/forms";
 import { Button, Field, cx } from "@/components/kit";
@@ -11,7 +11,7 @@ import { rupiah, rupiahShort } from "@/lib/format";
 import type { Offer, Prospect } from "@/db/schema";
 import { dpLabel, dpValue, effectiveDp, offerTotal } from "@/lib/offer";
 import { NewProspectFields, PackageFields, ProspectFields } from "./offer-fields";
-import { PackageTable, type PackageColumn } from "./package-table";
+import { PackageDetails, PackageRows, type PackageColumn } from "./package-list";
 
 type Cat = { id: string; name: string; allocation: number; need: string | null };
 export type VendorGroup = { vendor: Prospect; packages: Offer[] };
@@ -86,12 +86,13 @@ export function OfferCompare({
       </section>
     );
 
-  /** Tombol di kaki kolom paket: pilih, atau batalkan pesanan bila paket itu sudah dipesan. */
-  const pickButton = (c: PackageColumn) =>
+  /** Pilih paket, atau batalkan pesanan bila paket itu sudah dipesan. `wide`: selebar blok detail. */
+  const pickButton = (c: PackageColumn, wide = false) =>
     !canEdit ? null : c.pkg.status === "dipilih" ? (
       <ActionButton
         variant="outline"
-        className="w-full"
+        size={wide ? "md" : "sm"}
+        className={wide ? "w-full" : undefined}
         confirm={`Batalkan pesanan ${packageName(c)}? Vendor dan termin DP serta pelunasannya dihapus, paketnya tetap ada. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
         confirmLabel="Batalkan pesanan"
         action={cancelOffer.bind(null, c.pkg.id)}
@@ -100,14 +101,15 @@ export function OfferCompare({
       </ActionButton>
     ) : (
       <Button
-        className="w-full"
+        size={wide ? "md" : "sm"}
+        className={wide ? "w-full" : undefined}
         onClick={() => {
           setComparing(false);
           setSaved(null);
           setPicking(c);
         }}
       >
-        {booked ? "Pesan juga" : "Pilih paket ini"}
+        {booked ? "Pesan juga" : wide ? "Pilih paket ini" : "Pilih"}
       </Button>
     );
 
@@ -199,7 +201,7 @@ export function OfferCompare({
               selected={selected}
               onToggleSelect={toggle}
               onCompareAll={() => openCompare(g.packages.map((p) => p.id))}
-              footer={pickButton}
+              pick={pickButton}
             />
           ))}
         </div>
@@ -234,7 +236,9 @@ export function OfferCompare({
 
       <Modal open={comparing && compareColumns.length > 0} onClose={() => setComparing(false)} wide title={`Bandingkan ${compareColumns.length} paket ${cat?.name ?? ""}`.trim()}>
         <div className="max-h-[70dvh] overflow-y-auto">
-          <PackageTable columns={compareColumns} allocation={allocation} showVendor fileNames={fileNames} tone="surface" footer={pickButton} />
+          <div className="rounded-[18px] bg-sunken p-3">
+            <PackageDetails list={compareColumns} allocation={allocation} showVendor fileNames={fileNames} pick={(c) => pickButton(c, true)} />
+          </div>
         </div>
       </Modal>
 
@@ -265,7 +269,7 @@ function VendorCard({
   selected,
   onToggleSelect,
   onCompareAll,
-  footer,
+  pick,
 }: {
   group: VendorGroup;
   catOpts: { id: string; name: string }[];
@@ -276,8 +280,9 @@ function VendorCard({
   selected: string[];
   onToggleSelect: (id: string) => void;
   onCompareAll: () => void;
-  footer: (c: PackageColumn) => React.ReactNode;
+  pick: (c: PackageColumn, wide?: boolean) => React.ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
   const columns = packages.map((pkg) => ({ pkg, vendor: v }));
   const cheapest = Math.min(...packages.map(offerTotal));
   return (
@@ -345,16 +350,23 @@ function VendorCard({
           )}
         </div>
       </div>
-      <PackageTable
-        columns={columns}
-        allocation={allocation}
-        showVendor={false}
-        fileNames={fileNames}
+      <PackageRows
+        list={columns}
         selected={selected}
         onToggleSelect={onToggleSelect}
-        columnActions={canEdit ? (c) => <PackageActions c={c} templates={templates} fileNames={fileNames} last={packages.length === 1} /> : undefined}
-        footer={footer}
+        actions={canEdit ? (c) => <PackageActions c={c} templates={templates} fileNames={fileNames} last={packages.length === 1} /> : undefined}
+        pick={(c) => pick(c)}
       />
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="hit-44 inline-flex items-center gap-1 self-center rounded-lg px-2 text-[13px] font-semibold text-muted hover:text-ink"
+      >
+        {open ? "Sembunyikan isi paket" : packages.length > 1 ? "Lihat isi paket dan bedanya" : "Lihat isi paket"}
+        <ChevronDown size={16} className={cx("transition-transform duration-150", open && "rotate-180")} aria-hidden="true" />
+      </button>
+      {open && <PackageDetails list={columns} allocation={allocation} showVendor={false} fileNames={fileNames} />}
     </article>
   );
 }
@@ -363,7 +375,7 @@ function VendorCard({
 function PackageActions({ c, templates, fileNames, last }: { c: PackageColumn; templates: { label: string; offer: Offer }[]; fileNames: Record<string, string>; last: boolean }) {
   const name = c.pkg.packageName || "paket ini";
   return (
-    <span className="-ml-2.5 flex">
+    <span className="flex">
       <FormDialog
         variant="icon"
         triggerLabel={`Ubah ${name}`}
