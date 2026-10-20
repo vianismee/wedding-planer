@@ -212,6 +212,7 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 - Latar titik pada kanvas ikut bergeser dan membesar: penanda bahwa area itu bisa digeser dan di-zoom. Titik tidak dipakai di halaman lain.
 - Alat aktif memakai aksen (status "dipilih"). Kartu terpilih memakai border `ink` 2px.
 - Kartu palet memakai `BrandingCard` dari 21st.dev (`components/ui/color-palette.tsx`) tanpa animasi masuk, tanpa efek melayang saat hover, dan tanpa label kapital berjarak lebar. "Aa" ditulis dengan warna tergelap palet bila kontrasnya di atas putih minimal 3:1.
+- Pipet (I) mengambil warna dari foto, video, dan elemen di kanvas, dengan contoh warna di samping kursor. Warna yang diambil berkumpul di bar atas toolbar: klik untuk menyalin kodenya, atau jadikan palet, tambahkan ke palet terpilih, dan warnai elemen terpilih.
 - Pemilih warna memakai Cromia dari 21st.dev (`components/ui/cromia-color-picker.tsx`, dibungkus `components/color-field.tsx`). Tanpa kanal alpha karena warna palet disimpan sebagai hex 6 digit; warna cepat diambil dari palet lain di papan yang sama.
 - Semua aksi punya jalur keyboard: daftar elemen di panel Layer, menyambung lewat pilihan kartu di panel Properti, angka X/Y/L/T, tombol panah untuk menggeser, Ctrl+G dan Ctrl+Shift+G untuk kelompok, Ctrl+] dan Ctrl+[ untuk urutan lapisan.
 - Tag bawaan hanya saran. Anggota bisa menambah tag sendiri; tag yang tidak dipakai kartu mana pun hilang dari daftar.

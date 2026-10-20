@@ -31,6 +31,7 @@ import {
   Palette,
   PanelLeft,
   PenLine,
+  Pipette,
   Plus,
   Redo2,
   RotateCw,
@@ -97,13 +98,14 @@ import {
 } from "./board-view";
 import { useMoodSync } from "./use-mood-sync";
 import { useNoPageZoom } from "./no-page-zoom";
+import { sampleColor } from "./color-pick";
 import { record, step, type History } from "./history";
 import { polyDist, simplify, toLocal } from "./ink";
 import { Cursors, firstName, PeerAvatars, PeerSelections } from "./presence";
 import { DangerButton, GeometryFields, Help, IconAction, PanelHead, PhotoAdjust, Section, StrokePanel, TextField, TextPanel, ToolOptions, type InkStyle } from "./panels";
 import { groupOwners, LayersPanel } from "./layers";
 
-type Tool = "select" | "hand" | "link" | "pen" | "eraser" | "shape" | "text" | "frame";
+type Tool = "select" | "hand" | "link" | "pen" | "eraser" | "shape" | "text" | "frame" | "picker";
 type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
 type Sel = { kind: "node" | "edge" | "group"; ids: string[] } | null;
 type Corner = "nw" | "ne" | "sw" | "se";
@@ -245,6 +247,9 @@ export function MoodboardCanvas({
   const [preview, setPreview] = useState<MoodMoving>({});
   const [draft, setDraft] = useState<Draft>(null);
   const [erasing, setErasing] = useState<string[]>([]);
+  // Pipet: warna di bawah kursor (contoh di layar) dan warna yang sudah diambil, terbaru di depan.
+  const [hoverColor, setHoverColor] = useState<{ hex: string; x: number; y: number } | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [following, setFollowing] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Record<string, Upload>>({});
@@ -936,11 +941,53 @@ export function MoodboardCanvas({
     }
   }
 
+  /** Warna di titik layar: kartu teratas di titik itu (melewati yang terpotong frame), atau null di kanvas kosong. */
+  function colorAt(clientX: number, clientY: number) {
+    const p = world(clientX, clientY);
+    for (let i = shownNodes.length - 1; i >= 0; i--) {
+      const n = shownNodes[i];
+      const r = box(n);
+      if (p.x < r.x || p.x > r.x + r.w || p.y < r.y || p.y > r.y + r.h || isStroke(n)) continue;
+      const clip = frameClip(n, byId, box);
+      if (clip && !within({ x: p.x, y: p.y, w: 0, h: 0 }, clip)) continue;
+      if (n.type === "shape") return n.fill ?? n.color ?? null;
+      if (n.type === "text") return n.color ?? "#1c1b29";
+      const el = boardRef.current?.querySelector<HTMLElement>(`[data-id="${n.id}"]`);
+      const c = el ? sampleColor(el, clientX, clientY) : null;
+      if (c) return c;
+      if (n.type === "frame") return n.fill ?? "#ffffff";
+    }
+    return null;
+  }
+
+  function pickColor(hex: string) {
+    setPicked((list) => [hex, ...list.filter((x) => x !== hex)].slice(0, 12));
+  }
+
+  async function copyHex(hex: string) {
+    try {
+      await navigator.clipboard.writeText(hex.toUpperCase());
+      flash(`Kode warna ${hex.toUpperCase()} disalin.`);
+    } catch {
+      flash(`Kode warna ${hex.toUpperCase()}.`);
+    }
+  }
+
+  /** Warna yang diambil jadi kartu palet baru (paling banyak 6 warna, sesuai batas palet). */
+  function paletteFromPicked() {
+    if (addNode({ type: "palette", title: "Palet dari pipet", swatches: picked.slice(0, MOOD_LIMITS.swatches) })) setTool("select");
+  }
+
   function onBoardDown(e: ReactPointerEvent) {
     if (e.button !== 0 && e.button !== 1) return;
     boardRef.current?.focus({ preventScroll: true });
     if (editing) setEditing(null);
     const p = world(e.clientX, e.clientY);
+    if (tool === "picker" && !panning(e)) {
+      const c = colorAt(e.clientX, e.clientY);
+      if (c) pickColor(c);
+      return;
+    }
     if (panning(e) || tool === "link") {
       setFollowing(null);
       return startDrag(e, { kind: "pan", sx: p.sx, sy: p.sy, px: pan.x, py: pan.y });
@@ -1000,7 +1047,8 @@ export function MoodboardCanvas({
     const viaHandle = (e.target as HTMLElement).dataset?.linkHandle !== undefined;
     if ((e.button !== 0 && e.button !== 1) || drag.current?.kind === "pinch") return;
     // Alat gambar dan geser bekerja di atas elemen juga: biarkan kanvas yang menangani. Elemen terkunci juga.
-    if (lockedNode(n) || panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || tool === "frame" || (tool === "text" && n.type !== "text")) return;
+    if (lockedNode(n) || panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || tool === "frame" || tool === "picker" || (tool === "text" && n.type !== "text"))
+      return;
     // Frame di kanvas (bukan di dalam frame lain) dipilih lewat namanya, seperti di Figma, supaya menarik
     // di latarnya tetap bisa memilih beberapa isinya sekaligus. Setelah terpilih, latarnya bisa diseret.
     const onLabel = (e.target as HTMLElement).dataset?.frameLabel !== undefined;
@@ -1132,6 +1180,10 @@ export function MoodboardCanvas({
     }
     const p = world(e.clientX, e.clientY);
     if (e.pointerType !== "touch") presence({ board: active, cursor: { x: r1(p.x), y: r1(p.y) } });
+    if (tool === "picker" && !d) {
+      const c = colorAt(e.clientX, e.clientY);
+      setHoverColor(c ? { hex: c, x: p.sx, y: p.sy } : null);
+    }
     if (!d) return;
     if (d.kind === "pan") setPan({ x: d.px + (p.sx - d.sx), y: d.py + (p.sy - d.sy) });
     else if (d.kind === "move") {
@@ -1354,7 +1406,7 @@ export function MoodboardCanvas({
       }
       commit(ops, `nudge:${sel.ids.join()}`);
     } else {
-      const tools: Record<string, Tool> = { v: "select", h: "hand", c: "link", f: "frame", p: "pen", e: "eraser", r: "shape", t: "text" };
+      const tools: Record<string, Tool> = { v: "select", h: "hand", c: "link", f: "frame", p: "pen", e: "eraser", r: "shape", t: "text", i: "picker" };
       const next = tools[k.toLowerCase()];
       if (next) setTool(next);
       else if (k === "+" || k === "=") zoomStep(0.1);
@@ -1470,7 +1522,9 @@ export function MoodboardCanvas({
             ? "Seret untuk menggambar. Tahan Shift untuk persegi, lingkaran, atau garis lurus 45°"
             : tool === "frame"
               ? "Seret untuk membuat frame, atau klik untuk ukuran bawaan. Ukuran siap pakai ada di tombol Frame"
-              : null;
+              : tool === "picker" && !picked.length
+                ? "Klik foto, video, atau elemen untuk mengambil warnanya"
+                : null;
   // Elemen terpilih yang sebagian terpotong frame: kotaknya, untuk garis pilihan dan pegangan di luar potongan.
   const clippedSel = selNode && shownIds.has(selNode.id) && clipPath(box(selNode), frameClip(selNode, byId, box)) ? box(selNode) : null;
   const shareUrl = share[active] && typeof window !== "undefined" ? `${window.location.origin}/m/${share[active]}` : "";
@@ -1653,7 +1707,10 @@ export function MoodboardCanvas({
           onPointerMove={onMove}
           onPointerUp={onUp}
           onPointerCancel={onUp}
-          onPointerLeave={() => presence({ board: active, cursor: null })}
+          onPointerLeave={() => {
+            presence({ board: active, cursor: null });
+            setHoverColor(null);
+          }}
           onWheel={onWheel}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -1923,6 +1980,17 @@ export function MoodboardCanvas({
             )}
           </div>
 
+          {tool === "picker" && hoverColor && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute left-0 top-0 flex items-center gap-2 rounded-xl border border-line bg-surface py-1 pl-1 pr-2.5 shadow-bar"
+              style={{ transform: `translate(${hoverColor.x + 18}px, ${hoverColor.y + 18}px)` }}
+            >
+              <span className="size-7 rounded-lg border border-ink/15" style={{ background: hoverColor.hex }} />
+              <span className="text-[12px] font-bold tabular">{hoverColor.hex.toUpperCase()}</span>
+            </div>
+          )}
+
           <PeerSelections peers={peers} box={boxById} view={{ pan, zoom }} />
           <Cursors peers={peers} view={{ pan, zoom }} />
 
@@ -1962,6 +2030,58 @@ export function MoodboardCanvas({
               </div>
             ) : (
               toolHint && <p className="max-w-full rounded-xl bg-ink px-3.5 py-2.5 text-center text-[13px] font-semibold text-white">{toolHint}</p>
+            )}
+            {tool === "picker" && picked.length > 0 && (
+              <div
+                role="toolbar"
+                aria-label="Warna dari pipet"
+                onPointerDown={(e) => e.stopPropagation()}
+                className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border border-line bg-surface p-1.5 shadow-bar"
+              >
+                {picked.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    title={`Salin ${c.toUpperCase()}`}
+                    aria-label={`Salin kode warna ${c.toUpperCase()}`}
+                    onClick={() => copyHex(c)}
+                    className="flex size-10 items-center justify-center rounded-xl hover:bg-ground"
+                  >
+                    <span className="size-7 rounded-full border border-ink/15" style={{ background: c }} />
+                  </button>
+                ))}
+                <span className="mx-1 h-6 w-px bg-line" aria-hidden="true" />
+                <button type="button" onClick={paletteFromPicked} className="h-10 rounded-xl px-3 text-[12px] font-bold hover:bg-ground">
+                  Jadikan palet
+                </button>
+                {selNode?.type === "palette" && (selNode.swatches?.length ?? 0) < MOOD_LIMITS.swatches && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchNode(selNode.id, {
+                        swatches: [...new Set([...(selNode.swatches ?? []), ...picked])].slice(0, MOOD_LIMITS.swatches),
+                      })
+                    }
+                    className="h-10 rounded-xl px-3 text-[12px] font-bold hover:bg-ground"
+                  >
+                    Tambah ke {selNode.title || "palet"}
+                  </button>
+                )}
+                {selNodes.some((n) => n.color !== undefined) && (
+                  <button
+                    type="button"
+                    title={`Warnai dengan ${picked[0].toUpperCase()}`}
+                    onClick={() => patchSelected({ color: picked[0] }, `color:${selIds.join()}`)}
+                    className="flex h-10 items-center gap-1.5 rounded-xl px-3 text-[12px] font-bold hover:bg-ground"
+                  >
+                    <span className="size-3.5 rounded-full border border-ink/15" style={{ background: picked[0] }} aria-hidden="true" />
+                    Warnai elemen terpilih
+                  </button>
+                )}
+                <button type="button" onClick={() => setPicked([])} className="h-10 rounded-xl px-3 text-[12px] font-semibold text-muted hover:bg-ground hover:text-ink">
+                  Kosongkan
+                </button>
+              </div>
             )}
             {(tool === "pen" || tool === "shape" || tool === "text") && (
               <ToolOptions tool={tool} closedShape={shapeKind === "rect" || shapeKind === "ellipse"} style={style} onChange={(s) => setStyle((x) => ({ ...x, ...s }))} />
@@ -2042,6 +2162,13 @@ export function MoodboardCanvas({
                 </PopoverContent>
               </Popover>
               <ToolButton label="Teks" hint="Tulis teks (T)" on={tool === "text"} onClick={() => setTool("text")} icon={<Type size={18} aria-hidden="true" />} />
+              <ToolButton
+                label="Pipet"
+                hint="Pipet: ambil warna dari foto atau elemen (I)"
+                on={tool === "picker"}
+                onClick={() => setTool("picker")}
+                icon={<Pipette size={18} aria-hidden="true" />}
+              />
               <span className="mx-1 h-6 w-px shrink-0 bg-line" aria-hidden="true" />
               <label title="Unggah foto" className={cx(TOOL_CLASS, "cursor-pointer focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink hover:bg-ground")}>
                 <ImageIcon size={18} aria-hidden="true" />
@@ -2623,7 +2750,7 @@ export function MoodboardCanvas({
                   </Help>
                   <Help title="Bersama">Kursor anggota lain terlihat dengan nama di bawahnya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
                   <Help title="Keyboard">
-                    V Pilih, H Tangan, C Sambung, F Frame, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
+                    V Pilih, H Tangan, C Sambung, F Frame, P Pena, E Penghapus, R Bentuk, T Teks, I Pipet. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
                   </Help>
                 </div>
               </Section>

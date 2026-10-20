@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
@@ -8,7 +9,7 @@ import { dateShort } from "@/lib/format";
 import { updateWedding } from "@/actions/wedding";
 import { createInvite, deleteRole, removeMember, revokeInvite, setPassword, updateProfile } from "@/actions/anggota";
 import { ActionButton, ActionForm } from "@/components/forms";
-import { Avatar, Card, Field, Input, LinkButton, Meta, PageHeader, SectionTitle, Status } from "@/components/kit";
+import { Avatar, Card, Field, Input, LinkButton, Meta, PageHeader, SectionTitle, Status, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
 import { CopyLink } from "@/components/copy-link";
@@ -19,7 +20,7 @@ import { DangerZone, WeddingSwitcher } from "./client";
 
 export const metadata: Metadata = { title: "Pengaturan" };
 
-export default async function PengaturanPage() {
+export default async function PengaturanPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   // Semua anggota boleh membuka halaman ini untuk akun pribadinya. Bagian pernikahan dan anggota
   // mengikuti izin Pengaturan pernikahan: Lihat untuk melihat, Ubah untuk mengubah.
   const ctx = await requirePage();
@@ -48,79 +49,118 @@ export default async function PengaturanPage() {
   const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
   const seats = MAX_MEMBERS - members.length;
   const religion = RELIGIONS.find((r) => r.id === w.religion)?.name ?? w.religion;
+  const owner = ctx.member.role === "pemilik";
+  const exportGuests = can(ctx.perms, "tamu");
+
+  // Satu bagian per tab supaya tidak perlu menggulir jauh. Tab mengikuti URL (?tab=), jadi setelah
+  // menyimpan halaman tetap di tab yang sama. Tab yang tidak boleh dilihat tidak ditampilkan.
+  const tabs = [
+    ...(see
+      ? [
+          { id: "pernikahan", name: "Pernikahan" },
+          { id: "anggota", name: "Anggota" },
+          { id: "peran", name: "Peran dan akses" },
+        ]
+      : []),
+    { id: "akun", name: "Akun" },
+    ...(exportGuests || owner ? [{ id: "data", name: "Data dan privasi" }] : []),
+  ];
+  const { tab } = await searchParams;
+  const active = tabs.find((t) => t.id === tab)?.id ?? tabs[0].id;
 
   return (
     <>
       <PageHeader title="Pengaturan" description={see ? "Data pernikahan, anggota, akses, dan akun." : "Akun kamu."} />
 
-      <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-2">
-        {see && (
-          <Card className="flex flex-col gap-4">
-            <SectionTitle>Ruang pernikahan</SectionTitle>
-            {!manage ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Meta label="Calon pengantin">{w.groomName} dan {w.brideName}</Meta>
-                <Meta label="Tanggal akad">{dateShort(w.akadDate)}</Meta>
-                <Meta label="Kota">{w.city}</Meta>
-                <Meta label="Agama">{religion}</Meta>
-                <Meta label="Kantor pencatatan">{w.officeName || "Belum diisi"}</Meta>
-                <Meta label="Kuota tamu">
-                  Pria {w.quotaGroom}, wanita {w.quotaBride}
-                </Meta>
-              </div>
-            ) : (
-              <ActionForm action={updateWedding}>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Calon pengantin pria">
-                    <Input name="groomName" required defaultValue={w.groomName} />
-                  </Field>
-                  <Field label="Calon pengantin wanita">
-                    <Input name="brideName" required defaultValue={w.brideName} />
-                  </Field>
-                  <Field label="Tanggal akad" hint="Tenggat checklist dan tanggal acara yang belum selesai ikut bergeser.">
-                    <DateField name="akadDate" defaultValue={w.akadDate} />
-                  </Field>
-                  <Field label="Kota">
-                    <Input name="city" required defaultValue={w.city} />
-                  </Field>
-                  <Field label="Agama" hint="Menentukan jalur KUA atau Dukcapil.">
-                    <SelectField name="religion" defaultValue={w.religion} options={[...RELIGIONS.map((r) => ({ value: r.id, label: r.name }))]} />
-                  </Field>
-                  <Field label="Kantor pencatatan">
-                    <Input name="officeName" defaultValue={w.officeName ?? ""} placeholder="Contoh: KUA Kecamatan Laweyan" />
-                  </Field>
-                  <Field label="Kuota tamu pihak pria (orang)">
-                    <Input type="number" min={0} name="quotaGroom" defaultValue={w.quotaGroom} />
-                  </Field>
-                  <Field label="Kuota tamu pihak wanita (orang)">
-                    <Input type="number" min={0} name="quotaBride" defaultValue={w.quotaBride} />
-                  </Field>
-                </div>
-                <fieldset className="flex flex-col gap-1.5">
-                  <legend className="mb-1.5 text-[12px] font-semibold text-muted">Warna aksen</legend>
-                  <div className="flex flex-wrap gap-2">
-                    {ACCENTS.map((a) => (
-                      <label
-                        key={a.id}
-                        className="flex h-11 cursor-pointer items-center gap-2 rounded-xl border-2 border-transparent bg-ground px-3 text-[13px] font-semibold has-[:checked]:border-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
-                      >
-                        <input type="radio" name="accent" value={a.id} defaultChecked={w.accent === a.id} className="sr-only" />
-                        <span className="size-5 rounded-full ring-1 ring-black/10" style={{ background: a.id }} aria-hidden="true" />
-                        {a.name}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <p className="text-[12px] text-muted">
-                  Template adat: akad {templateName(w.akadTemplate)}, resepsi {templateName(w.resepsiTemplate)}. Isi acara, checklist, dan seserahan bisa
-                  diedit langsung di halamannya.
-                </p>
-              </ActionForm>
-            )}
-          </Card>
-        )}
+      {tabs.length > 1 && (
+        <nav aria-label="Bagian pengaturan" className="-mx-1 flex max-w-full gap-1 self-start overflow-x-auto rounded-xl bg-ground p-1">
+          {tabs.map((t) => (
+            <Link
+              key={t.id}
+              href={`/pengaturan?tab=${t.id}`}
+              aria-current={t.id === active ? "page" : undefined}
+              className={cx(
+                "flex h-10 shrink-0 items-center rounded-[10px] px-3.5 text-[13px] font-bold no-underline transition-colors duration-150",
+                t.id === active ? "bg-ink text-white" : "text-ink hover:bg-surface",
+              )}
+            >
+              {t.name}
+            </Link>
+          ))}
+        </nav>
+      )}
 
-        <div className="flex flex-col gap-6">
+      {active === "pernikahan" && (
+        <div className="max-w-[880px]">
+          {see && (
+            <Card className="flex flex-col gap-4">
+              <SectionTitle>Ruang pernikahan</SectionTitle>
+              {!manage ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Meta label="Calon pengantin">{w.groomName} dan {w.brideName}</Meta>
+                  <Meta label="Tanggal akad">{dateShort(w.akadDate)}</Meta>
+                  <Meta label="Kota">{w.city}</Meta>
+                  <Meta label="Agama">{religion}</Meta>
+                  <Meta label="Kantor pencatatan">{w.officeName || "Belum diisi"}</Meta>
+                  <Meta label="Kuota tamu">
+                    Pria {w.quotaGroom}, wanita {w.quotaBride}
+                  </Meta>
+                </div>
+              ) : (
+                <ActionForm action={updateWedding}>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Calon pengantin pria">
+                      <Input name="groomName" required defaultValue={w.groomName} />
+                    </Field>
+                    <Field label="Calon pengantin wanita">
+                      <Input name="brideName" required defaultValue={w.brideName} />
+                    </Field>
+                    <Field label="Tanggal akad" hint="Tenggat checklist dan tanggal acara yang belum selesai ikut bergeser.">
+                      <DateField name="akadDate" defaultValue={w.akadDate} />
+                    </Field>
+                    <Field label="Kota">
+                      <Input name="city" required defaultValue={w.city} />
+                    </Field>
+                    <Field label="Agama" hint="Menentukan jalur KUA atau Dukcapil.">
+                      <SelectField name="religion" defaultValue={w.religion} options={[...RELIGIONS.map((r) => ({ value: r.id, label: r.name }))]} />
+                    </Field>
+                    <Field label="Kantor pencatatan">
+                      <Input name="officeName" defaultValue={w.officeName ?? ""} placeholder="Contoh: KUA Kecamatan Laweyan" />
+                    </Field>
+                    <Field label="Kuota tamu pihak pria (orang)">
+                      <Input type="number" min={0} name="quotaGroom" defaultValue={w.quotaGroom} />
+                    </Field>
+                    <Field label="Kuota tamu pihak wanita (orang)">
+                      <Input type="number" min={0} name="quotaBride" defaultValue={w.quotaBride} />
+                    </Field>
+                  </div>
+                  <fieldset className="flex flex-col gap-1.5">
+                    <legend className="mb-1.5 text-[12px] font-semibold text-muted">Warna aksen</legend>
+                    <div className="flex flex-wrap gap-2">
+                      {ACCENTS.map((a) => (
+                        <label
+                          key={a.id}
+                          className="flex h-11 cursor-pointer items-center gap-2 rounded-xl border-2 border-transparent bg-ground px-3 text-[13px] font-semibold has-[:checked]:border-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink"
+                        >
+                          <input type="radio" name="accent" value={a.id} defaultChecked={w.accent === a.id} className="sr-only" />
+                          <span className="size-5 rounded-full ring-1 ring-black/10" style={{ background: a.id }} aria-hidden="true" />
+                          {a.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <p className="text-[12px] text-muted">
+                    Template adat: akad {templateName(w.akadTemplate)}, resepsi {templateName(w.resepsiTemplate)}. Isi acara, checklist, dan seserahan bisa
+                    diedit langsung di halamannya.
+                  </p>
+                </ActionForm>
+              )}
+            </Card>
+          )}
+        </div>
+      )}
+      {active === "anggota" && (
+        <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-2">
           {see && (
             <Card className="flex flex-col gap-4">
               <SectionTitle aside={<Status tone={seats > 0 ? "neutral" : "warn"}>{members.length} dari {MAX_MEMBERS} anggota</Status>}>
@@ -168,6 +208,48 @@ export default async function PengaturanPage() {
             </Card>
           )}
 
+          {manage && (
+            <Card className="flex flex-col gap-4">
+              <SectionTitle>Undang anggota</SectionTitle>
+              {seats > 0 ? (
+                <ActionForm action={createInvite} submitLabel="Buat undangan" resetOnSuccess>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <Field label="Peran" hint="Aksesnya bisa diatur lagi per orang setelah bergabung.">
+                      <SelectField name="role" defaultValue={roles.find((r) => r.key === "keluarga") ? "keluarga" : roles[0]?.key} options={roleOptions} />
+                    </Field>
+                    <Field label="Email (opsional)" hint="Kosongkan untuk membuat link yang dibagikan lewat WhatsApp.">
+                      <Input type="email" name="email" />
+                    </Field>
+                  </div>
+                </ActionForm>
+              ) : (
+                <p className="text-[13px] font-semibold text-warn-fg">Sudah {MAX_MEMBERS} anggota. Keluarkan anggota lain untuk mengundang lagi.</p>
+              )}
+              {invites.length > 0 && (
+                <div className="flex flex-col gap-3 border-t border-ground pt-4">
+                  <h3 className="text-[14px] font-bold">Undangan menunggu</h3>
+                  {invites.map((inv) => (
+                    <div key={inv.id} className="flex flex-col gap-2 rounded-[14px] bg-sunken p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+                        <span>
+                          <strong>{roleName(inv.role, ctx.roles)}</strong>
+                          {inv.email ? ` untuk ${inv.email}` : ", link terbuka"}. Berlaku sampai {dateShort(inv.expiresAt.toISOString().slice(0, 10))}.
+                        </span>
+                        <ActionButton variant="ghost" size="sm" action={revokeInvite.bind(null, inv.id)}>
+                          Batalkan
+                        </ActionButton>
+                      </div>
+                      <CopyLink url={`${base}/undangan/${inv.token}`} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
+        </div>
+      )}
+      {active === "peran" && (
+        <div className="max-w-[880px]">
           {see && (
             <Card className="flex flex-col gap-4">
               <SectionTitle aside={manage ? <RoleEditor roles={roles} max={ctx.perms} /> : undefined}>Peran dan akses</SectionTitle>
@@ -214,46 +296,10 @@ export default async function PengaturanPage() {
               </ul>
             </Card>
           )}
-
-          {manage && (
-            <Card className="flex flex-col gap-4">
-              <SectionTitle>Undang anggota</SectionTitle>
-              {seats > 0 ? (
-                <ActionForm action={createInvite} submitLabel="Buat undangan" resetOnSuccess>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label="Peran" hint="Aksesnya bisa diatur lagi per orang setelah bergabung.">
-                      <SelectField name="role" defaultValue={roles.find((r) => r.key === "keluarga") ? "keluarga" : roles[0]?.key} options={roleOptions} />
-                    </Field>
-                    <Field label="Email (opsional)" hint="Kosongkan untuk membuat link yang dibagikan lewat WhatsApp.">
-                      <Input type="email" name="email" />
-                    </Field>
-                  </div>
-                </ActionForm>
-              ) : (
-                <p className="text-[13px] font-semibold text-warn-fg">Sudah {MAX_MEMBERS} anggota. Keluarkan anggota lain untuk mengundang lagi.</p>
-              )}
-              {invites.length > 0 && (
-                <div className="flex flex-col gap-3 border-t border-ground pt-4">
-                  <h3 className="text-[14px] font-bold">Undangan menunggu</h3>
-                  {invites.map((inv) => (
-                    <div key={inv.id} className="flex flex-col gap-2 rounded-[14px] bg-sunken p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
-                        <span>
-                          <strong>{roleName(inv.role, ctx.roles)}</strong>
-                          {inv.email ? ` untuk ${inv.email}` : ", link terbuka"}. Berlaku sampai {dateShort(inv.expiresAt.toISOString().slice(0, 10))}.
-                        </span>
-                        <ActionButton variant="ghost" size="sm" action={revokeInvite.bind(null, inv.id)}>
-                          Batalkan
-                        </ActionButton>
-                      </div>
-                      <CopyLink url={`${base}/undangan/${inv.token}`} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
-
+        </div>
+      )}
+      {active === "akun" && (
+        <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-2">
           <Card className="flex flex-col gap-4">
             <SectionTitle>Akun kamu</SectionTitle>
             <ActionForm action={updateProfile} inlineSubmit submitVariant="ground">
@@ -291,21 +337,25 @@ export default async function PengaturanPage() {
             </p>
             <InstallApp variant="card" />
           </Card>
-
+        </div>
+      )}
+      {active === "data" && (
+        <div className="max-w-[880px]">
           <Card className="flex flex-col gap-3">
             <SectionTitle>Data dan privasi</SectionTitle>
             <p className="text-[13px] text-muted">
-              Ekspor daftar tamu kapan saja. Pemilik bisa menghapus seluruh ruang pernikahan, termasuk scan dokumen, secara permanen.
+              {exportGuests && "Ekspor daftar tamu kapan saja. "}
+              {owner ? "Sebagai pemilik, kamu bisa menghapus seluruh ruang pernikahan, termasuk scan dokumen, secara permanen." : ""}
             </p>
-            {can(ctx.perms, "tamu") && (
+            {exportGuests && (
               <a href="/api/export/tamu" className="text-[13px] font-semibold underline">
                 Unduh daftar tamu (CSV)
               </a>
             )}
-            {ctx.member.role === "pemilik" && <DangerZone confirmText={`${w.groomName} & ${w.brideName}`} />}
+            {owner && <DangerZone confirmText={`${w.groomName} & ${w.brideName}`} />}
           </Card>
         </div>
-      </div>
+      )}
     </>
   );
 }
