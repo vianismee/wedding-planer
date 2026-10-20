@@ -19,6 +19,7 @@ const base = {
   tags: z.array(z.string().trim().min(1).max(MOOD_TAG_MAX)).max(MOOD_LIMITS.tags),
   locked: z.boolean().optional(),
   hidden: z.boolean().optional(),
+  parent: id.optional(),
 };
 
 export const nodeSchema = z.discriminatedUnion("type", [
@@ -39,6 +40,7 @@ export const nodeSchema = z.discriminatedUnion("type", [
       .max(MOOD_LIMITS.media),
   }),
   z.object({ ...base, type: z.literal("note"), text: z.string().max(2000).optional() }),
+  z.object({ ...base, type: z.literal("frame"), fill: hex.optional(), clip: z.boolean().optional() }),
   z.object({ ...base, type: z.literal("palette"), swatches: z.array(hex).max(MOOD_LIMITS.swatches).optional() }),
   z.object({
     ...base,

@@ -5,11 +5,12 @@ import { asc, desc, eq } from "drizzle-orm";
 import { MapPin, Pencil, Plus, Store, Trash2 } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { dateLong, dayMonth, relativeDays, time, todayISO } from "@/lib/format";
 import { SCHEDULE_KINDS, scheduleKind } from "@/lib/schedule-kinds";
 import { deleteSchedule, updateSchedule, addSchedule } from "@/actions/jadwal";
 import { ActionButton, FormDialog } from "@/components/forms";
-import { Empty, PageHeader, Status, cx } from "@/components/kit";
+import { Empty, PageHeader, Status, ViewOnly, cx } from "@/components/kit";
 import { ScheduleFields } from "../dashboard/schedule-calendar";
 
 export const metadata: Metadata = { title: "Jadwal" };
@@ -24,6 +25,7 @@ const KIND_TONE: Record<string, string> = {
 
 export default async function JadwalPage({ searchParams }: { searchParams: Promise<{ jenis?: string; waktu?: string }> }) {
   const ctx = await requirePage("jadwal");
+  const edit = can(ctx.perms, "jadwal", "edit");
   const wid = ctx.wedding.id;
   const today = todayISO();
   const { jenis, waktu } = await searchParams;
@@ -72,21 +74,24 @@ export default async function JadwalPage({ searchParams }: { searchParams: Promi
             : "Test food, fitting busana, survey lokasi, meeting vendor, dan janji lain di luar rangkaian acara."
         }
         actions={
-          <FormDialog
-            title="Tambah jadwal"
-            description="Misalnya test food, fitting busana, survey gedung, atau meeting vendor."
-            action={addSchedule}
-            trigger={
-              <>
-                <Plus size={16} aria-hidden="true" />
-                Tambah jadwal
-              </>
-            }
-          >
-            <ScheduleFields date={today} vendors={vendors} />
-          </FormDialog>
+          edit && (
+            <FormDialog
+              title="Tambah jadwal"
+              description="Misalnya test food, fitting busana, survey gedung, atau meeting vendor."
+              action={addSchedule}
+              trigger={
+                <>
+                  <Plus size={16} aria-hidden="true" />
+                  Tambah jadwal
+                </>
+              }
+            >
+              <ScheduleFields date={today} vendors={vendors} />
+            </FormDialog>
+          )
         }
       />
+      {!edit && <ViewOnly what="jadwal" />}
 
       <div className="flex flex-col gap-3">
         <nav aria-label="Waktu" className="flex gap-1 self-start rounded-xl bg-surface p-1">
@@ -193,25 +198,27 @@ export default async function JadwalPage({ searchParams }: { searchParams: Promi
                             </div>
                             {s.note && <p className="mt-1.5 rounded-[10px] bg-sunken px-2.5 py-1.5 text-[12px]">{s.note}</p>}
                           </div>
-                          <span className="-my-1 flex shrink-0">
-                            <FormDialog
-                              variant="icon"
-                              triggerLabel={`Ubah ${s.title}`}
-                              title="Ubah jadwal"
-                              action={updateSchedule.bind(null, s.id)}
-                              trigger={<Pencil size={15} aria-hidden="true" />}
-                            >
-                              <ScheduleFields s={s} date={s.date} vendors={vendors} />
-                            </FormDialog>
-                            <ActionButton
-                              variant="icon"
-                              label={`Hapus ${s.title}`}
-                              confirm={`Hapus jadwal ${s.title}?`}
-                              action={deleteSchedule.bind(null, s.id)}
-                            >
-                              <Trash2 size={15} aria-hidden="true" />
-                            </ActionButton>
-                          </span>
+                          {edit && (
+                            <span className="-my-1 flex shrink-0">
+                              <FormDialog
+                                variant="icon"
+                                triggerLabel={`Ubah ${s.title}`}
+                                title="Ubah jadwal"
+                                action={updateSchedule.bind(null, s.id)}
+                                trigger={<Pencil size={15} aria-hidden="true" />}
+                              >
+                                <ScheduleFields s={s} date={s.date} vendors={vendors} />
+                              </FormDialog>
+                              <ActionButton
+                                variant="icon"
+                                label={`Hapus ${s.title}`}
+                                confirm={`Hapus jadwal ${s.title}?`}
+                                action={deleteSchedule.bind(null, s.id)}
+                              >
+                                <Trash2 size={15} aria-hidden="true" />
+                              </ActionButton>
+                            </span>
+                          )}
                         </li>
                       );
                     })}

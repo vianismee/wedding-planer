@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { MOOD_BOARDS, type MoodBoardId } from "@/lib/moodboard";
 import { LinkButton } from "@/components/kit";
 import { moodFontVars } from "@/lib/mood-fonts";
 import { MoodboardCanvas } from "./canvas";
+import { MoodboardReadOnly } from "./read-only";
 
 export const metadata: Metadata = { title: "Moodboard" };
 
@@ -36,7 +38,11 @@ export default async function MoodboardPage() {
         </LinkButton>
       </section>
       <div className={`hidden h-[calc(100dvh-24px)] min-h-[520px] min-[768px]:block ${moodFontVars}`}>
-        <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} me={{ id: ctx.user.id, name: ctx.user.name }} />
+        {can(ctx.perms, "moodboard", "edit") ? (
+          <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} me={{ id: ctx.user.id, name: ctx.user.name }} />
+        ) : (
+          <MoodboardReadOnly boards={data} />
+        )}
       </div>
     </>
   );

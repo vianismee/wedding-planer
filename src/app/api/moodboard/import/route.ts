@@ -18,7 +18,7 @@ const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "
 export async function POST(req: Request) {
   const ctx = await getContext();
   if (!ctx) return NextResponse.json({ error: "Kamu perlu masuk dulu." }, { status: 401 });
-  if (!can(ctx.member.role, "moodboard")) return NextResponse.json({ error: "Peranmu tidak boleh menambah ke moodboard." }, { status: 403 });
+  if (!can(ctx.perms, "moodboard", "edit")) return NextResponse.json({ error: "Kamu hanya bisa melihat moodboard, tidak menambah isinya." }, { status: 403 });
   if (!rateLimit(`mood-import:${ctx.user.id}`, 20, 60_000)) return NextResponse.json({ error: "Terlalu banyak link sekaligus. Tunggu sebentar." }, { status: 429 });
   const p = body.safeParse(await req.json().catch(() => null));
   if (!p.success) return NextResponse.json({ error: "Tempel link terlebih dulu." }, { status: 400 });

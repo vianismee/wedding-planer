@@ -36,7 +36,11 @@ export function VendorDetail({
   rest,
   unscheduled,
   baseUrl,
+  canEdit,
+  canEditTerms,
 }: {
+  canEdit: boolean;
+  canEditTerms: boolean;
   v: Vendor;
   terms: PaymentTerm[];
   cats: Cat[];
@@ -114,7 +118,7 @@ export function VendorDetail({
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-[13px] text-muted">Belum diisi. Tambahkan lewat tombol Ubah.</p>
+                  <p className="text-[13px] text-muted">Belum diisi.{canEdit && " Tambahkan lewat tombol Ubah."}</p>
                 )}
               </section>
 
@@ -159,23 +163,25 @@ export function VendorDetail({
                   <h3 id={`termin-${v.id}`} className="text-[13px] font-bold">
                     Termin pembayaran
                   </h3>
-                  <FormDialog
-                    variant="ground"
-                    size="sm"
-                    title={`Tambah termin ${v.name}`}
-                    action={addTerm.bind(null, v.id)}
-                    trigger={
-                      <>
-                        <Plus size={14} aria-hidden="true" />
-                        Termin
-                      </>
-                    }
-                  >
-                    <TermFields defaultAmount={unscheduled} />
-                  </FormDialog>
+                  {canEditTerms && (
+                    <FormDialog
+                      variant="ground"
+                      size="sm"
+                      title={`Tambah termin ${v.name}`}
+                      action={addTerm.bind(null, v.id)}
+                      trigger={
+                        <>
+                          <Plus size={14} aria-hidden="true" />
+                          Termin
+                        </>
+                      }
+                    >
+                      <TermFields defaultAmount={unscheduled} />
+                    </FormDialog>
+                  )}
                 </div>
                 {terms.length === 0 ? (
-                  <p className="text-[13px] text-muted">Belum ada termin. Tambahkan DP, cicilan, atau pelunasan.</p>
+                  <p className="text-[13px] text-muted">Belum ada termin.{canEditTerms && " Tambahkan DP, cicilan, atau pelunasan."}</p>
                 ) : (
                   <ul className="flex flex-col gap-1.5">
                     {terms.map((t) => {
@@ -194,19 +200,25 @@ export function VendorDetail({
                             </Status>
                           ) : (
                             <>
-                              <Status tone={d <= 7 ? "warn" : "neutral"}>{relativeDays(t.dueDate, today)}</Status>
-                              <FormDialog
-                                variant="icon"
-                                triggerLabel={`Ubah termin ${t.label}`}
-                                title={`Ubah termin ${t.label}`}
-                                action={updateTerm.bind(null, t.id)}
-                                trigger={<Pencil size={14} aria-hidden="true" />}
-                              >
-                                <TermFields t={t} />
-                              </FormDialog>
-                              <ActionButton variant="icon" label={`Hapus termin ${t.label}`} confirm={`Hapus termin ${t.label}?`} action={deleteTerm.bind(null, t.id)}>
-                                <Trash2 size={14} aria-hidden="true" />
-                              </ActionButton>
+                              <Status tone={d <= 7 ? "warn" : "neutral"} className={canEditTerms ? undefined : "mr-2"}>
+                                {relativeDays(t.dueDate, today)}
+                              </Status>
+                              {canEditTerms && (
+                                <>
+                                  <FormDialog
+                                    variant="icon"
+                                    triggerLabel={`Ubah termin ${t.label}`}
+                                    title={`Ubah termin ${t.label}`}
+                                    action={updateTerm.bind(null, t.id)}
+                                    trigger={<Pencil size={14} aria-hidden="true" />}
+                                  >
+                                    <TermFields t={t} />
+                                  </FormDialog>
+                                  <ActionButton variant="icon" label={`Hapus termin ${t.label}`} confirm={`Hapus termin ${t.label}?`} action={deleteTerm.bind(null, t.id)}>
+                                    <Trash2 size={14} aria-hidden="true" />
+                                  </ActionButton>
+                                </>
+                              )}
                             </>
                           )}
                         </li>
@@ -215,7 +227,7 @@ export function VendorDetail({
                   </ul>
                 )}
                 {unscheduled > 0 && <p className="text-[12px] font-semibold text-warn-fg">{rupiah(unscheduled)} belum dijadwalkan sebagai termin.</p>}
-                <p className="text-[12px] text-muted">Tandai termin lunas di halaman Budget.</p>
+                {canEditTerms && <p className="text-[12px] text-muted">Tandai termin lunas di halaman Budget.</p>}
               </section>
 
               <section className="flex flex-col gap-2 rounded-[14px] border border-line p-3.5" aria-labelledby={`share-${v.id}`}>
@@ -229,56 +241,64 @@ export function VendorDetail({
                       Vendor bisa melihat ringkasan pesanan, tanggal acara, dan jadwal pembayaran tanpa login. Budget, tamu, dan dokumen tidak ikut terlihat.
                     </p>
                     <CopyLink url={`${baseUrl}/v/${v.shareToken}`} />
-                    <ActionButton variant="outline" size="sm" className="self-start" action={setVendorShare.bind(null, v.id, false)}>
-                      Cabut link
-                    </ActionButton>
+                    {canEdit && (
+                      <ActionButton variant="outline" size="sm" className="self-start" action={setVendorShare.bind(null, v.id, false)}>
+                        Cabut link
+                      </ActionButton>
+                    )}
                   </>
                 ) : (
                   <>
-                    <p className="text-[12px] text-muted">Buat link baca-saja untuk dikirim ke vendor lewat WhatsApp sebagai konfirmasi pesanan.</p>
-                    <ActionButton variant="primary" size="sm" className="self-start" action={setVendorShare.bind(null, v.id, true)}>
-                      Buat link untuk vendor
-                    </ActionButton>
+                    <p className="text-[12px] text-muted">
+                      {canEdit ? "Buat link baca-saja untuk dikirim ke vendor lewat WhatsApp sebagai konfirmasi pesanan." : "Belum ada link untuk vendor ini."}
+                    </p>
+                    {canEdit && (
+                      <ActionButton variant="primary" size="sm" className="self-start" action={setVendorShare.bind(null, v.id, true)}>
+                        Buat link untuk vendor
+                      </ActionButton>
+                    )}
                   </>
                 )}
               </section>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4 min-[760px]:col-span-2">
-              {v.offerId ? (
-                // Vendor dari penawaran: batalkan pesanan, penawarannya kembali ke perbandingan.
-                <ActionButton
-                  variant="danger"
-                  confirm={`Batalkan pesanan ${v.name}? Termin DP dan pelunasan dihapus, penawarannya kembali ke perbandingan. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
-                  confirmLabel="Batalkan pesanan"
-                  action={async () => {
-                    const r = await cancelOffer(v.offerId!);
-                    if (r.ok) close();
-                    return r;
-                  }}
-                >
-                  <X size={14} aria-hidden="true" />
-                  Batalkan pesanan
-                </ActionButton>
-              ) : (
-                <ActionButton
-                  variant="danger"
-                  confirm={`Hapus vendor ${v.name} beserta termin yang belum dibayar? Pengeluaran yang sudah tercatat tetap ada.`}
-                  action={async () => {
-                    const r = await deleteVendor(v.id);
-                    if (r.ok) close();
-                    return r;
-                  }}
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  Hapus vendor
-                </ActionButton>
-              )}
-              <Button variant="ground" onClick={() => setEditing(true)}>
-                <Pencil size={14} aria-hidden="true" />
-                Ubah vendor
-              </Button>
-            </div>
+            {canEdit && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4 min-[760px]:col-span-2">
+                {v.offerId ? (
+                  // Vendor dari penawaran: batalkan pesanan, penawarannya kembali ke perbandingan.
+                  <ActionButton
+                    variant="danger"
+                    confirm={`Batalkan pesanan ${v.name}? Termin DP dan pelunasan dihapus, penawarannya kembali ke perbandingan. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
+                    confirmLabel="Batalkan pesanan"
+                    action={async () => {
+                      const r = await cancelOffer(v.offerId!);
+                      if (r.ok) close();
+                      return r;
+                    }}
+                  >
+                    <X size={14} aria-hidden="true" />
+                    Batalkan pesanan
+                  </ActionButton>
+                ) : (
+                  <ActionButton
+                    variant="danger"
+                    confirm={`Hapus vendor ${v.name} beserta termin yang belum dibayar? Pengeluaran yang sudah tercatat tetap ada.`}
+                    action={async () => {
+                      const r = await deleteVendor(v.id);
+                      if (r.ok) close();
+                      return r;
+                    }}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    Hapus vendor
+                  </ActionButton>
+                )}
+                <Button variant="ground" onClick={() => setEditing(true)}>
+                  <Pencil size={14} aria-hidden="true" />
+                  Ubah vendor
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </Modal>

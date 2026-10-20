@@ -192,17 +192,21 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 
 ### Perbandingan penawaran (pola khusus)
 
-- Satu kolom per penawaran, setiap baris memakai label sendiri (Termasuk, DP, Ketersediaan, Catatan).
-- Selisih terhadap alokasi budget dihitung otomatis dan diberi warna: hijau bila di bawah alokasi, oranye-coklat bila di atas.
-- Label "Termurah" juga dihitung, bukan ditulis tangan.
-- Pilihan ditandai dengan border `ink` 2px dan label "Dipilih" berwarna aksen.
+- Satu calon vendor dicatat sekali (kontak, ketersediaan, DP bawaan) dan punya beberapa paket. Paket boleh punya DP sendiri.
+- Setiap calon vendor tampil sebagai satu kartu berisi tabel paketnya berdampingan: kolom = paket, baris = harga, pembayaran, isi paket, add-on. Paket satu vendor tidak dipecah jadi kartu terpisah. Kolom label menempel di kiri saat tabel digeser.
+- Isi paket dicocokkan antar kolom (huruf besar, spasi, dan tanda baca di ujung diabaikan). Isi yang sama di semua paket dilipat jadi satu baris yang bisa dibuka; yang berbeda tampil dengan latar `ground`. Menyalin paket menjaga teks isinya sama supaya pencocokan akurat.
+- Paket dari beberapa vendor dalam satu kategori bisa dicentang (maksimal 4) lalu dibandingkan dalam tabel yang sama di dialog lebar.
+- Selisih terhadap alokasi budget dihitung otomatis dan diberi warna: hijau bila di bawah alokasi, oranye-coklat bila di atas. Hanya tampil untuk yang boleh melihat Budget.
+- Label "Termurah" juga dihitung, bukan ditulis tangan. Paket yang sudah dipesan diberi label "Dipesan" di kepala kolomnya.
 
 ### Moodboard (pola khusus)
 
 - Kanvas bebas berisi kartu foto, catatan, dan palet, dengan kelompok bernama dan sambungan berlabel. Tiga papan: Konsep utama, Akad, Resepsi.
 - Layar penuh tanpa sidebar dan capsule (route group `(fokus)`). Tombol "Dashboard" di pojok kiri atas menjadi jalan kembali.
 - Tata letak seperti Figma: panel Layer di kiri (bisa ditutup, tertutup otomatis di bawah 1280px), kanvas di tengah dengan toolbar alat melayang di bawah, dan panel Properti di kanan. Toolbar bawah hanya ikon; nama dan pintasan ada di tooltip dan label aksesibel. Petunjuk alat dan pengaturan alat bertumpuk tepat di atas toolbar.
-- Panel Layer: kelompok tampil seperti folder berisi elemen di dalamnya, urutan dari atas sama dengan tumpukan di kanvas. Isi kelompok mengikuti posisi di kanvas, bukan relasi tersimpan. Ikon mata dan gembok hanya muncul saat hover, dan tetap terlihat saat aktif.
+- Dua cara mengelompokkan, mengikuti Figma. **Section** (dulu "Kelompok"): area berwarna, isinya mengikuti posisi di kanvas. **Frame**: seperti kertas berukuran pasti dengan latar sendiri; isinya tersimpan (elemen masuk saat dilepas di atas frame dan keluar saat diseret keluar), bagian yang keluar tepi terpotong, bisa bersarang, dan bisa diunduh jadi PNG. Ukuran siap pakai: post dan story Instagram, undangan A5, foto 4R, A4, dan presentasi 16:9 (ukuran cetak 150 dpi).
+- Nama frame ditulis kecil `muted` di atas sudut kirinya, ukurannya tetap di layar berapa pun zoom-nya. Frame di kanvas dipilih lewat namanya; menarik di latarnya memilih isinya.
+- Panel Layer: section dan frame tampil seperti folder berisi elemen di dalamnya, urutan dari atas sama dengan tumpukan di kanvas. Ikon mata dan gembok hanya muncul saat hover, dan tetap terlihat saat aktif.
 - Panel Properti dibagi per bagian dengan judul kecil `muted` dan garis tipis: Posisi dan ukuran, isi khusus per jenis elemen, Tag, Sambungan, Susun, lalu Hapus paling bawah.
 - Foto di kartu bisa "Isi kartu" (dipotong mengikuti titik fokus yang dipilih) atau "Utuh". Foto dibuka penuh lewat klik dua kali, tombol perbesar di pojok kartu, atau "Lihat foto penuh" di panel.
 - Latar titik pada kanvas ikut bergeser dan membesar: penanda bahwa area itu bisa digeser dan di-zoom. Titik tidak dipakai di halaman lain.
@@ -212,6 +216,10 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 - Semua aksi punya jalur keyboard: daftar elemen di panel Layer, menyambung lewat pilihan kartu di panel Properti, angka X/Y/L/T, tombol panah untuk menggeser, Ctrl+G dan Ctrl+Shift+G untuk kelompok, Ctrl+] dan Ctrl+[ untuk urutan lapisan.
 - Tag bawaan hanya saran. Anggota bisa menambah tag sendiri; tag yang tidak dipakai kartu mana pun hilang dari daftar.
 - Simpan otomatis 800ms setelah perubahan. Bila anggota lain sudah menyimpan papan yang sama, simpanan ditolak dan pengguna diminta memuat ulang, bukan ditimpa diam-diam.
+
+### Akses hanya lihat
+
+Izin tiap anggota diatur per halaman (Tidak ada, Lihat, Ubah) di Pengaturan. Untuk anggota yang hanya boleh melihat, halaman tampil seperti biasa tanpa tombol tambah, ubah, dan hapus, dengan satu baris `ViewOnly` di bawah judul. Jangan menampilkan tombol yang pasti ditolak server. Data dari halaman lain (misalnya alokasi budget di Catering dan Vendor, atau ringkasan tamu di Beranda) hanya tampil bila halaman asalnya boleh dilihat.
 
 ### Empty state
 

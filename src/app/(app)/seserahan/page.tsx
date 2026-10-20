@@ -3,10 +3,11 @@ import { asc, eq } from "drizzle-orm";
 import { Pencil, Plus } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { dateShort, rupiah } from "@/lib/format";
 import { addItem, renameCategory } from "@/actions/seserahan";
 import { FormDialog } from "@/components/forms";
-import { Card, Field, Input, PageHeader, Progress, SectionTitle, Status } from "@/components/kit";
+import { Card, Field, Input, PageHeader, Progress, SectionTitle, Status, ViewOnly } from "@/components/kit";
 import type { SeserahanItem } from "@/db/schema";
 import { MaharCard } from "./mahar-card";
 import { ItemStatus } from "./item-status";
@@ -16,6 +17,7 @@ export const metadata: Metadata = { title: "Seserahan dan mahar" };
 
 export default async function SeserahanPage() {
   const ctx = await requirePage("seserahan");
+  const edit = can(ctx.perms, "seserahan", "edit");
   const wid = ctx.wedding.id;
   const [items, maharItems, akad] = await Promise.all([
     db.select().from(schema.seserahanItem).where(eq(schema.seserahanItem.weddingId, wid)).orderBy(asc(schema.seserahanItem.sortOrder), asc(schema.seserahanItem.name)),
@@ -45,27 +47,30 @@ export default async function SeserahanPage() {
         title="Seserahan dan mahar"
         description={`Diserahkan saat akad, ${dateShort(akadEvent?.date ?? ctx.wedding.akadDate)}.`}
         actions={
-          <FormDialog
-            title="Tambah item seserahan"
-            action={addItem}
-            trigger={
-              <>
-                <Plus size={16} aria-hidden="true" />
-                Tambah item
-              </>
-            }
-          >
-            <ItemFields categories={categories} />
-          </FormDialog>
+          edit && (
+            <FormDialog
+              title="Tambah item seserahan"
+              action={addItem}
+              trigger={
+                <>
+                  <Plus size={16} aria-hidden="true" />
+                  Tambah item
+                </>
+              }
+            >
+              <ItemFields categories={categories} />
+            </FormDialog>
+          )
         }
       />
+      {!edit && <ViewOnly what="seserahan dan mahar" />}
 
       <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-[minmax(0,1fr)_340px]">
         <div className="grid grid-cols-1 items-start gap-4 min-[720px]:grid-cols-2">
           {items.length === 0 && (
             <div className="rounded-[22px] bg-surface p-5 min-[720px]:col-span-2">
               <p className="text-[14px] font-bold">Belum ada item seserahan.</p>
-              <p className="text-[13px] text-muted">Tambahkan item pertama, misalnya seperangkat alat salat.</p>
+              <p className="text-[13px] text-muted">{edit ? "Tambahkan item pertama, misalnya seperangkat alat salat." : "Item akan muncul di sini setelah ditambahkan."}</p>
             </div>
           )}
           {[...groups.entries()].map(([cat, list]) => {
@@ -77,19 +82,21 @@ export default async function SeserahanPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-0.5">
                       <h2 className="truncate text-[16px] font-bold">{cat}</h2>
-                      <FormDialog
-                        variant="icon"
-                        triggerLabel={`Ubah nama kategori ${cat}`}
-                        triggerClassName="hit-44 size-9 shrink-0"
-                        title="Ubah nama kategori"
-                        description={`Nama baru berlaku untuk ${list.length} item di kategori ini.`}
-                        action={renameCategory.bind(null, cat)}
-                        trigger={<Pencil size={14} aria-hidden="true" />}
-                      >
-                        <Field label="Nama kategori" hint="Bila sama dengan kategori lain, kedua kategori akan digabung.">
-                          <Input name="name" required defaultValue={cat} maxLength={60} />
-                        </Field>
-                      </FormDialog>
+                      {edit && (
+                        <FormDialog
+                          variant="icon"
+                          triggerLabel={`Ubah nama kategori ${cat}`}
+                          triggerClassName="hit-44 size-9 shrink-0"
+                          title="Ubah nama kategori"
+                          description={`Nama baru berlaku untuk ${list.length} item di kategori ini.`}
+                          action={renameCategory.bind(null, cat)}
+                          trigger={<Pencil size={14} aria-hidden="true" />}
+                        >
+                          <Field label="Nama kategori" hint="Bila sama dengan kategori lain, kedua kategori akan digabung.">
+                            <Input name="name" required defaultValue={cat} maxLength={60} />
+                          </Field>
+                        </FormDialog>
+                      )}
                     </div>
                     <p className="text-[12px] text-muted">{subtotal > 0 ? `Subtotal ${rupiah(subtotal)}` : "Harga belum diisi"}</p>
                   </div>
@@ -99,8 +106,14 @@ export default async function SeserahanPage() {
                 </div>
                 {list.map((it) => (
                   <div key={it.id} className="flex items-center gap-2 border-b border-ground py-1 last:border-0">
-                    <ItemDetail it={it} categories={categories} />
-                    <ItemStatus id={it.id} status={it.status} name={it.name} />
+                    <ItemDetail it={it} categories={categories} canEdit={edit} />
+                    {edit ? (
+                      <ItemStatus id={it.id} status={it.status} name={it.name} />
+                    ) : (
+                      <Status tone={it.status === "terbeli" ? "ok" : it.status === "dipesan" ? "info" : "warn"}>
+                        {it.status === "terbeli" ? "Terbeli" : it.status === "dipesan" ? "Dipesan" : "Belum"}
+                      </Status>
+                    )}
                   </div>
                 ))}
               </section>
@@ -109,7 +122,7 @@ export default async function SeserahanPage() {
         </div>
 
         <div className="flex flex-col gap-5">
-          <MaharCard items={maharItems} />
+          <MaharCard items={maharItems} canEdit={edit} />
 
           <Card className="flex flex-col gap-3">
             <SectionTitle>Ringkasan</SectionTitle>

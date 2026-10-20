@@ -11,7 +11,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const ctx = await getContext();
   if (!ctx) redirect("/onboarding");
 
-  const items = ORDER.filter((id) => can(ctx.member.role, id));
+  // Pengaturan selalu ada: akun pribadi (nama, kata sandi) bisa diatur semua anggota.
+  const items = ORDER.filter((id) => id === "pengaturan" || can(ctx.perms, id));
   const weddingName = `${ctx.wedding.groomName} & ${ctx.wedding.brideName}`;
 
   return (

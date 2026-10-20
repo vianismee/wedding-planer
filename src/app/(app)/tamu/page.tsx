@@ -3,8 +3,9 @@ import { asc, eq } from "drizzle-orm";
 import { Download } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { number } from "@/lib/format";
-import { Card, Note, PageHeader, Progress, cx } from "@/components/kit";
+import { Card, Note, PageHeader, Progress, ViewOnly, cx } from "@/components/kit";
 import { GuestManager } from "./guest-manager";
 
 export const metadata: Metadata = { title: "Daftar tamu" };
@@ -12,6 +13,7 @@ export const metadata: Metadata = { title: "Daftar tamu" };
 export default async function TamuPage() {
   const ctx = await requirePage("tamu");
   const w = ctx.wedding;
+  const edit = can(ctx.perms, "tamu", "edit");
   const guests = await db
     .select({
       id: schema.guest.id,
@@ -76,7 +78,8 @@ export default async function TamuPage() {
         </Note>
       )}
 
-      <GuestManager guests={guests} />
+      {!edit && <ViewOnly what="daftar tamu" />}
+      <GuestManager guests={guests} canEdit={edit} />
     </>
   );
 }

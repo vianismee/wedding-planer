@@ -7,7 +7,6 @@ import { db, schema } from "@/db";
 import { requireAction } from "@/lib/session";
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
 import { diffDays } from "@/lib/format";
-import { can } from "@/lib/roles";
 
 function done() {
   revalidatePath("/checklist");
@@ -48,7 +47,6 @@ async function parseTask(fd: FormData, weddingId: string, akadDate: string) {
 export async function addTask(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("checklist");
-    if (ctx.member.role === "panitia") throw new UserError("Panitia hanya bisa mencentang tugasnya sendiri.");
     const data = await parseTask(fd, ctx.wedding.id, ctx.wedding.akadDate);
     await db.insert(schema.task).values({ ...data, weddingId: ctx.wedding.id });
     done();
@@ -58,7 +56,6 @@ export async function addTask(fd: FormData): Promise<ActionResult> {
 export async function updateTask(id: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("checklist");
-    if (ctx.member.role === "panitia") throw new UserError("Panitia hanya bisa mencentang tugasnya sendiri.");
     const data = await parseTask(fd, ctx.wedding.id, ctx.wedding.akadDate);
     await db
       .update(schema.task)
@@ -71,7 +68,6 @@ export async function updateTask(id: string, fd: FormData): Promise<ActionResult
 export async function deleteTask(id: string): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("checklist");
-    if (ctx.member.role === "panitia") throw new UserError("Panitia tidak bisa menghapus tugas.");
     await db.delete(schema.task).where(and(eq(schema.task.id, id), eq(schema.task.weddingId, ctx.wedding.id)));
     done();
   });
@@ -79,13 +75,14 @@ export async function deleteTask(id: string): Promise<ActionResult> {
 
 export async function toggleTask(id: string, value: boolean): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("checklist");
+    // Yang hanya boleh melihat atau "Tugas sendiri" tetap bisa mencentang tugas yang ditugaskan kepadanya.
+    const ctx = await requireAction("checklist", "view");
     const [t] = await db
       .select()
       .from(schema.task)
       .where(and(eq(schema.task.id, id), eq(schema.task.weddingId, ctx.wedding.id)));
     if (!t) throw new UserError("Tugas tidak ditemukan.");
-    if (!can(ctx.member.role, "tamu") && t.assigneeMemberId !== ctx.member.id)
+    if (ctx.perms.checklist !== "edit" && t.assigneeMemberId !== ctx.member.id)
       throw new UserError("Kamu hanya bisa mencentang tugasmu sendiri.");
     await db
       .update(schema.task)

@@ -12,7 +12,7 @@ const esc = (v: unknown) => {
 
 export async function GET() {
   const ctx = await getContext();
-  if (!ctx || !can(ctx.member.role, "tamu")) return new Response("Tidak diizinkan", { status: 403 });
+  if (!ctx || !can(ctx.perms, "tamu")) return new Response("Tidak diizinkan", { status: 403 });
   const rows = await db
     .select()
     .from(schema.guest)

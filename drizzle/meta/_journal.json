@@ -92,6 +92,27 @@
       "when": 1792420601497,
       "tag": "0012_moodboard_share",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792504522062,
+      "tag": "0013_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792506679550,
+      "tag": "0014_vendor_packages",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792506708798,
+      "tag": "0015_offer_cleanup",
+      "breakpoints": true
     }
   ]
 }

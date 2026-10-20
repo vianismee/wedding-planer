@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getSession } from "@/lib/session";
-import { findInvite } from "@/lib/invites";
-import { ROLE_HELP, ROLE_LABEL, type Role } from "@/lib/roles";
+import { findInvite, inviteRoleInfo } from "@/lib/invites";
 import { buttonClass } from "@/components/kit";
 import { AcceptButton, RememberInvite } from "./accept";
 
@@ -21,6 +20,7 @@ export default async function InvitePage({
   const row = /^[a-f0-9]{32}$/.test(token) ? await findInvite(token) : null;
   // Setelah daftar atau masuk, kembali ke sini dan undangan langsung diterima.
   const back = encodeURIComponent(`/undangan/${token}?auto=1`);
+  const role = row ? await inviteRoleInfo(row.wedding.id, row.invite.role) : null;
 
   return (
     <main className="flex min-h-dvh items-center justify-center p-4">
@@ -46,9 +46,9 @@ export default async function InvitePage({
             </div>
             <div className="rounded-[18px] bg-sunken p-4 text-[14px]">
               <p>
-                Kamu diundang sebagai <strong>{ROLE_LABEL[row.invite.role as Role]}</strong>.
+                Kamu diundang sebagai <strong>{role?.name}</strong>.
               </p>
-              <p className="text-muted">{ROLE_HELP[row.invite.role as Exclude<Role, "pemilik">]}</p>
+              <p className="text-muted">{role?.summary}</p>
               {row.invite.email && <p className="mt-1 text-[13px] text-muted">Undangan ini untuk {row.invite.email}.</p>}
             </div>
             {session ? (

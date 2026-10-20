@@ -1,76 +1,115 @@
 "use client";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useActionState, useEffect, useMemo, useState, useTransition } from "react";
-import { Check, Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
-import { addOffer, cancelOffer, chooseOffer, deleteOffer, trackCompare, updateOffer } from "@/actions/vendor";
+import { useActionState, useMemo, useState } from "react";
+import { Copy, Pencil, Plus, Trash2, X } from "lucide-react";
+import { addPackage, addProspect, cancelOffer, chooseOffer, deletePackage, deleteProspect, duplicatePackage, trackCompare, updatePackage, updateProspect } from "@/actions/vendor";
 import { ActionButton, FormDialog, Modal, type ActionResult, submitWith } from "@/components/forms";
-import { useConfirm } from "@/components/confirm";
-import { Button, Field, Status, cx } from "@/components/kit";
+import { Button, Field, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { rupiah, rupiahShort } from "@/lib/format";
-import type { Offer } from "@/db/schema";
-import { addonsTotal, dpLabel, dpText, dpValue, offerTotal } from "@/lib/offer";
-import { OfferFields } from "./offer-fields";
+import type { Offer, Prospect } from "@/db/schema";
+import { dpLabel, dpValue, effectiveDp, offerTotal } from "@/lib/offer";
+import { NewProspectFields, PackageFields, ProspectFields } from "./offer-fields";
+import { PackageTable, type PackageColumn } from "./package-table";
 
 type Cat = { id: string; name: string; allocation: number; need: string | null };
+export type VendorGroup = { vendor: Prospect; packages: Offer[] };
 
+const MAX_COMPARE = 4;
+const packageName = (c: PackageColumn) => `${c.vendor.name}${c.pkg.packageName ? `, ${c.pkg.packageName}` : ""}`;
+
+/** "DP 30%", "DP Rp 2 jt", atau "Tanpa DP": DP bawaan calon vendor, sebelum dihitung dari total paket. */
+function dpShort(v: Prospect) {
+  if (v.dpType === "none") return "Tanpa DP";
+  return v.dpType === "nominal" ? `DP ${rupiahShort(v.dpAmount)}` : `DP ${v.dpPercent}%`;
+}
+
+/**
+ * Perbandingan calon vendor per kategori. Setiap calon vendor tampil sebagai satu kartu berisi tabel
+ * paketnya berdampingan; paket dari beberapa vendor bisa dicentang lalu dibandingkan dalam satu tabel.
+ */
 export function OfferCompare({
   cats,
-  offers,
+  groups,
   bookedCats,
   initialCat,
   fileNames,
   defaults,
+  canEdit,
+  seeBudget,
 }: {
+  canEdit: boolean;
+  seeBudget: boolean;
   cats: Cat[];
-  offers: Offer[];
+  groups: VendorGroup[];
   bookedCats: string[];
   initialCat?: string;
   fileNames: Record<string, string>;
   defaults: { dpDue: string; settleDue: string };
 }) {
-  // Kategori dengan penawaran tampil lebih dulu.
+  // Kategori dengan calon vendor tampil lebih dulu.
   const tabs = useMemo(() => {
-    const count = (id: string) => offers.filter((o) => o.categoryId === id).length;
-    return [...cats].sort((a, b) => Number(count(b.id) > 0) - Number(count(a.id) > 0)).map((c) => ({ ...c, count: count(c.id) }));
-  }, [cats, offers]);
-  const [catId, setCatId] = useState<string | undefined>(
-    (initialCat && cats.some((c) => c.id === initialCat) ? initialCat : undefined) ?? tabs[0]?.id,
-  );
-  const [picked, setPicked] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+    const inCat = (id: string) => groups.filter((g) => g.vendor.categoryId === id);
+    return [...cats]
+      .map((c) => ({ ...c, vendors: inCat(c.id).length, packages: inCat(c.id).reduce((s, g) => s + g.packages.length, 0) }))
+      .sort((a, b) => Number(b.vendors > 0) - Number(a.vendors > 0));
+  }, [cats, groups]);
+  const [catId, setCatId] = useState<string | undefined>((initialCat && cats.some((c) => c.id === initialCat) ? initialCat : undefined) ?? tabs[0]?.id);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [comparing, setComparing] = useState(false);
+  const [picking, setPicking] = useState<PackageColumn | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (catId && offers.some((o) => o.categoryId === catId)) trackCompare(catId).catch(() => {});
-  }, [catId, offers]);
-
   const cat = cats.find((c) => c.id === catId);
-  const list = offers.filter((o) => o.categoryId === catId);
-  const min = list.length > 1 ? Math.min(...list.map(offerTotal)) : null;
-  const chosen = list.find((o) => o.status === "dipilih");
-  const pickedOffer = list.find((o) => o.id === picked) ?? null;
+  const list = groups.filter((g) => g.vendor.categoryId === catId);
+  const columns = list.flatMap((g) => g.packages.map((pkg) => ({ pkg, vendor: g.vendor })));
+  const chosen = columns.find((c) => c.pkg.status === "dipilih");
   const booked = catId ? bookedCats.includes(catId) : false;
+  const allocation = seeBudget && cat ? cat.allocation : null;
+  const compareColumns = selected.map((id) => columns.find((c) => c.pkg.id === id)).filter((c): c is PackageColumn => !!c);
+
+  const toggle = (id: string) =>
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= MAX_COMPARE ? s : [...s, id]));
+  const openCompare = (ids?: string[]) => {
+    if (ids) setSelected(ids.slice(0, MAX_COMPARE));
+    setComparing(true);
+    if (catId) trackCompare(catId).catch(() => {});
+  };
+  const catOpts = cats.map((c) => ({ id: c.id, name: c.name }));
 
   if (cats.length === 0)
     return (
       <section className="rounded-[24px] bg-surface p-5">
         <h2 className="text-[18px] font-bold">Bandingkan penawaran</h2>
-        <p className="mt-1 text-[13px] text-muted">
-          Belum ada kategori budget. Tambahkan kategori di halaman Budget, lalu bandingkan penawaran per kategori di sini.
-        </p>
+        <p className="mt-1 text-[13px] text-muted">Belum ada kategori budget. Tambahkan kategori di halaman Budget, lalu bandingkan penawaran per kategori di sini.</p>
       </section>
     );
 
-  let summary = cat
-    ? `Belum ada yang dipilih. Bandingkan harga terhadap alokasi ${rupiahShort(cat.allocation)}, lalu pilih satu penawaran.`
-    : "";
-  if (chosen) summary = `${chosen.vendorName} sudah dipesan untuk ${cat?.name}.`;
-  if (pickedOffer)
-    summary = `${pickedOffer.vendorName} dipilih. Total ${rupiahShort(offerTotal(pickedOffer))}, ${
-      dpValue(pickedOffer) > 0 ? `DP ${rupiahShort(dpValue(pickedOffer))} saat booking` : "tanpa DP"
-    }.`;
+  /** Tombol di kaki kolom paket: pilih, atau batalkan pesanan bila paket itu sudah dipesan. */
+  const pickButton = (c: PackageColumn) =>
+    !canEdit ? null : c.pkg.status === "dipilih" ? (
+      <ActionButton
+        variant="outline"
+        className="w-full"
+        confirm={`Batalkan pesanan ${packageName(c)}? Vendor dan termin DP serta pelunasannya dihapus, paketnya tetap ada. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
+        confirmLabel="Batalkan pesanan"
+        action={cancelOffer.bind(null, c.pkg.id)}
+      >
+        Batalkan pesanan
+      </ActionButton>
+    ) : (
+      <Button
+        className="w-full"
+        onClick={() => {
+          setComparing(false);
+          setSaved(null);
+          setPicking(c);
+        }}
+      >
+        {booked ? "Pesan juga" : "Pilih paket ini"}
+      </Button>
+    );
 
   return (
     <section className="flex flex-col gap-4 rounded-[24px] bg-surface p-4 sm:p-5" aria-labelledby="cmp-title">
@@ -82,23 +121,24 @@ export function OfferCompare({
           {cat && (
             <p className="text-[13px] text-muted">
               {cat.name}
-              {cat.need ? `: ${cat.need}` : ""}. Alokasi budget {rupiahShort(cat.allocation)}.
+              {cat.need ? `: ${cat.need}` : ""}.{allocation !== null && ` Alokasi budget ${rupiahShort(allocation)}.`}
             </p>
           )}
         </div>
-        {cat && (
+        {cat && canEdit && (
           <FormDialog
-            title={`Tambah penawaran ${cat.name}`}
-            action={addOffer}
+            wide
+            title={`Tambah calon vendor ${cat.name}`}
+            description="Info vendor diisi sekali. Paket lain dari vendor yang sama ditambahkan di kartunya."
+            action={addProspect}
             trigger={
               <>
                 <Plus size={16} aria-hidden="true" />
-                Tambah penawaran
+                Tambah vendor
               </>
             }
-            wide
           >
-            <OfferFields cats={cats} categoryId={cat.id} />
+            <NewProspectFields cats={catOpts} categoryId={cat.id} />
           </FormDialog>
         )}
       </div>
@@ -111,7 +151,7 @@ export function OfferCompare({
             aria-pressed={t.id === catId}
             onClick={() => {
               setCatId(t.id);
-              setPicked(null);
+              setSelected([]);
               setSaved(null);
             }}
             className={cx(
@@ -121,7 +161,7 @@ export function OfferCompare({
           >
             <span className="text-[13px] font-bold leading-tight">{t.name}</span>
             <span className={cx("text-[11px] font-semibold leading-tight", t.id === catId ? "text-[#c9c8d6]" : "text-muted")}>
-              {t.count} penawaran
+              {t.vendors ? `${t.vendors} vendor, ${t.packages} paket` : "Belum ada"}
             </span>
           </button>
         ))}
@@ -129,179 +169,223 @@ export function OfferCompare({
 
       {saved && (
         <Alert variant="ok">
-<AlertDescription>{saved}{" "}
-          <a href="/budget" className="underline">
-            Lihat termin di Budget
-          </a></AlertDescription>
-</Alert>
+          <AlertDescription>
+            {saved}{" "}
+            <a href="/budget" className="underline">
+              Lihat termin di Budget
+            </a>
+          </AlertDescription>
+        </Alert>
       )}
 
       {list.length === 0 ? (
         <div className="rounded-[18px] bg-sunken p-5">
-          <p className="text-[14px] font-bold">Belum ada penawaran untuk {cat?.name}.</p>
-          <p className="text-[13px] text-muted">Tambahkan penawaran pertama untuk mulai membandingkan.</p>
+          <p className="text-[14px] font-bold">Belum ada calon vendor untuk {cat?.name}.</p>
+          <p className="text-[13px] text-muted">
+            {canEdit ? "Tambahkan vendor pertama beserta paketnya. Vendor dengan beberapa paket cukup dicatat sekali." : "Calon vendor akan muncul di sini setelah ditambahkan."}
+          </p>
         </div>
       ) : (
-        <div className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1">
-          {list.map((o) => {
-            const isPicked = o.id === picked;
-            const isChosen = o.status === "dipilih";
-            const selected = isPicked || (isChosen && !picked);
-            const total = offerTotal(o);
-            const d = cat ? total - cat.allocation : 0;
-            return (
-              <article
-                key={o.id}
-                className={cx(
-                  "flex min-w-[240px] flex-1 snap-start flex-col gap-2.5 rounded-[18px] border-2 p-4",
-                  selected ? "border-ink bg-surface" : "border-transparent bg-sunken",
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-[14px] font-bold">{o.vendorName}</h3>
-                    {o.packageName && <p className="text-[12px] text-muted">{o.packageName}</p>}
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    {min !== null && total === min && <Status tone="ok">Termurah</Status>}
-                    {selected && <Status tone="accent">{isChosen && !isPicked ? "Dipesan" : "Dipilih"}</Status>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[26px] font-extrabold leading-[1.1] tracking-[-0.02em]">{rupiahShort(total)}</div>
-                  {o.addons.length > 0 && (
-                    <div className="text-[12px] text-muted">
-                      Paket {rupiahShort(o.price)} + {o.addons.length} add-on {rupiahShort(addonsTotal(o.addons))}
-                    </div>
-                  )}
-                </div>
-                {cat && cat.allocation > 0 && (
-                  <div className={cx("text-[12px] font-bold", d < 0 ? "text-ok-fg" : d > 0 ? "text-warn-fg" : "text-muted")}>
-                    {d < 0 ? `${rupiahShort(-d)} di bawah alokasi` : d > 0 ? `${rupiahShort(d)} di atas alokasi` : "Pas dengan alokasi"}
-                  </div>
-                )}
-                <dl className="flex flex-col gap-2 border-t border-line pt-2.5 text-[13px]">
-                  <Row label="Termasuk">
-                    {o.includeItems.length ? (
-                      <ul className="mt-0.5 flex flex-col gap-0.5">
-                        {o.includeItems.map((it, i) => (
-                          <li key={i} className="flex gap-1.5">
-                            <Check size={14} className="mt-[3px] shrink-0 text-ok-fg" aria-hidden="true" />
-                            <span>{it}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      "Belum diisi"
-                    )}
-                  </Row>
-                  {o.addons.length > 0 && (
-                    <Row label="Add-on di luar paket">
-                      <ul className="mt-0.5 flex flex-col gap-0.5">
-                        {o.addons.map((a, i) => (
-                          <li key={i} className="flex justify-between gap-2">
-                            <span className="min-w-0">
-                              {a.label}
-                              {a.qty > 1 ? ` x${a.qty}` : ""}
-                            </span>
-                            <span className="shrink-0 tabular">{rupiahShort(a.qty * a.price)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </Row>
-                  )}
-                  <Row label="DP saat booking">
-                    {dpText(o)}
-                  </Row>
-                  <Row label="Ketersediaan">
-                    <span className={o.available ? "" : "text-warn-fg"}>{o.availability || (o.available ? "Tersedia" : "Belum dikonfirmasi")}</span>
-                  </Row>
-                  {o.notes && <Row label="Catatan">{o.notes}</Row>}
-                  {o.attachmentFileId && (
-                    <Row label="Lampiran">
-                      <a href={`/api/files/${o.attachmentFileId}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
-                        <Paperclip size={13} aria-hidden="true" />
-                        {fileNames[o.attachmentFileId] ?? "Buka lampiran"}
-                      </a>
-                    </Row>
-                  )}
-                </dl>
-                <div className="mt-auto flex items-center gap-1 pt-1">
-                  {isChosen ? (
-                    <ActionButton
-                      variant="outline"
-                      className="flex-1"
-                      confirm={`Batalkan pesanan ${o.vendorName}? Vendor dan termin DP serta pelunasannya dihapus, penawarannya tetap ada. Pengeluaran yang sudah dibayar tetap tercatat di Budget.`}
-                      confirmLabel="Batalkan pesanan"
-                      action={async () => {
-                        const r = await cancelOffer(o.id);
-                        if (r.ok) setSaved(null);
-                        return r;
-                      }}
-                    >
-                      Batalkan pesanan
-                    </ActionButton>
-                  ) : (
-                    <Button
-                      variant={isPicked ? "outline" : "primary"}
-                      aria-pressed={isPicked}
-                      className="flex-1"
-                      onClick={() => {
-                        setPicked(isPicked ? null : o.id);
-                        setSaved(null);
-                      }}
-                    >
-                      {isPicked ? "Batalkan pilihan" : "Pilih penawaran ini"}
-                    </Button>
-                  )}
-                  <FormDialog
-                    variant="icon"
-                    triggerLabel={`Ubah penawaran ${o.vendorName}`}
-                    title={`Ubah penawaran ${o.vendorName}`}
-                    action={updateOffer.bind(null, o.id)}
-                    trigger={<Pencil size={15} aria-hidden="true" />}
-                    wide
-                  >
-                    <OfferFields cats={cats} categoryId={o.categoryId} o={o} fileName={o.attachmentFileId ? fileNames[o.attachmentFileId] : undefined} />
-                  </FormDialog>
-                  <DeleteOffer o={o} onDone={() => picked === o.id && setPicked(null)} />
-                </div>
-              </article>
-            );
-          })}
+        <div className="flex flex-col gap-3">
+          {list.map((g) => (
+            <VendorCard
+              key={g.vendor.id}
+              group={g}
+              catOpts={catOpts}
+              templates={columns.map((c) => ({ label: packageName(c), offer: c.pkg }))}
+              allocation={allocation}
+              fileNames={fileNames}
+              canEdit={canEdit}
+              selected={selected}
+              onToggleSelect={toggle}
+              onCompareAll={() => openCompare(g.packages.map((p) => p.id))}
+              footer={pickButton}
+            />
+          ))}
         </div>
       )}
 
-      {list.length > 0 && (
+      {/* Bar bawah: paket yang dicentang untuk dibandingkan, atau ringkasan pilihan kategori ini. */}
+      {(selected.length > 0 || chosen) && (
         <div
           className={cx(
             "flex flex-wrap items-center justify-between gap-3 rounded-[18px] bg-ground p-3.5",
-            pickedOffer &&
-              "rise max-[899px]:fixed max-[899px]:inset-x-3 max-[899px]:z-20 max-[899px]:bg-surface max-[899px]:shadow-bar",
+            selected.length > 0 && "rise max-[899px]:fixed max-[899px]:inset-x-3 max-[899px]:z-20 max-[899px]:bg-surface max-[899px]:shadow-bar",
           )}
-          style={pickedOffer ? { bottom: "calc(96px + env(safe-area-inset-bottom))" } : undefined}
+          style={selected.length > 0 ? { bottom: "calc(96px + env(safe-area-inset-bottom))" } : undefined}
         >
-          <p className="min-w-0 flex-1 text-[13px] font-semibold">{summary}</p>
-          {pickedOffer && (
-            <Button onClick={() => setSaving(true)}>{booked ? "Simpan sebagai vendor tambahan" : "Simpan pilihan"}</Button>
+          <p className="min-w-0 flex-1 text-[13px] font-semibold">
+            {selected.length > 0
+              ? `${selected.length} paket dipilih untuk dibandingkan${selected.length >= MAX_COMPARE ? `, maksimal ${MAX_COMPARE}` : ""}.`
+              : `${packageName(chosen!)} sudah dipesan untuk ${cat?.name}.`}
+          </p>
+          {selected.length > 0 && (
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setSelected([])}>
+                Kosongkan
+              </Button>
+              <Button disabled={selected.length < 2} onClick={() => openCompare()}>
+                Bandingkan
+              </Button>
+            </div>
           )}
         </div>
       )}
 
-      {pickedOffer && (
+      <Modal open={comparing && compareColumns.length > 0} onClose={() => setComparing(false)} wide title={`Bandingkan ${compareColumns.length} paket ${cat?.name ?? ""}`.trim()}>
+        <div className="max-h-[70dvh] overflow-y-auto">
+          <PackageTable columns={compareColumns} allocation={allocation} showVendor fileNames={fileNames} tone="surface" footer={pickButton} />
+        </div>
+      </Modal>
+
+      {picking && (
         <SaveDialog
-          open={saving}
-          offer={pickedOffer}
+          column={picking}
           defaults={defaults}
-          onClose={() => setSaving(false)}
+          onClose={() => setPicking(null)}
           onSaved={(msg) => {
-            setSaving(false);
-            setPicked(null);
+            setPicking(null);
+            setSelected([]);
             setSaved(msg);
           }}
         />
       )}
     </section>
+  );
+}
+
+/** Satu calon vendor: info bersama, lalu tabel semua paketnya berdampingan. */
+function VendorCard({
+  group: { vendor: v, packages },
+  catOpts,
+  templates,
+  allocation,
+  fileNames,
+  canEdit,
+  selected,
+  onToggleSelect,
+  onCompareAll,
+  footer,
+}: {
+  group: VendorGroup;
+  catOpts: { id: string; name: string }[];
+  templates: { label: string; offer: Offer }[];
+  allocation: number | null;
+  fileNames: Record<string, string>;
+  canEdit: boolean;
+  selected: string[];
+  onToggleSelect: (id: string) => void;
+  onCompareAll: () => void;
+  footer: (c: PackageColumn) => React.ReactNode;
+}) {
+  const columns = packages.map((pkg) => ({ pkg, vendor: v }));
+  const cheapest = Math.min(...packages.map(offerTotal));
+  return (
+    <article className="flex flex-col gap-3 rounded-[18px] bg-sunken p-4" aria-labelledby={`pv-${v.id}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3 id={`pv-${v.id}`} className="text-[16px] font-bold">
+            {v.name}
+          </h3>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px]">
+            <span>{packages.length} paket</span>
+            <span>{dpShort(v)}</span>
+            <span className={v.available ? "" : "font-semibold text-warn-fg"}>{v.availability || (v.available ? "Tersedia" : "Belum dikonfirmasi")}</span>
+            {v.contact && <span>{v.contact}</span>}
+          </div>
+          {v.notes && <p className="text-[12px] text-muted">{v.notes}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {packages.length > 1 && (
+            <Button variant="ghost" size="sm" onClick={onCompareAll}>
+              Bandingkan semua paket
+            </Button>
+          )}
+          {canEdit && (
+            <>
+              <FormDialog
+                variant="ground"
+                size="sm"
+                wide
+                title={`Tambah paket ${v.name}`}
+                description="DP mengikuti vendor, kecuali diatur khusus untuk paket ini."
+                action={addPackage.bind(null, v.id)}
+                trigger={
+                  <>
+                    <Plus size={14} aria-hidden="true" />
+                    Paket
+                  </>
+                }
+              >
+                <PackageFields vendor={v} templates={templates} />
+              </FormDialog>
+              <FormDialog
+                variant="icon"
+                triggerLabel={`Ubah info ${v.name}`}
+                wide
+                title={`Ubah info ${v.name}`}
+                description="Berlaku untuk semua paket vendor ini."
+                action={updateProspect.bind(null, v.id)}
+                trigger={<Pencil size={15} aria-hidden="true" />}
+                footer={
+                  <ActionButton
+                    variant="danger"
+                    className="mr-auto"
+                    confirm={`Hapus ${v.name} beserta ${packages.length} paketnya? Vendor yang sudah dipesan tetap ada.`}
+                    action={deleteProspect.bind(null, v.id)}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    Hapus vendor
+                  </ActionButton>
+                }
+              >
+                <ProspectFields cats={catOpts} p={v} total={cheapest} />
+              </FormDialog>
+            </>
+          )}
+        </div>
+      </div>
+      <PackageTable
+        columns={columns}
+        allocation={allocation}
+        showVendor={false}
+        fileNames={fileNames}
+        selected={selected}
+        onToggleSelect={onToggleSelect}
+        columnActions={canEdit ? (c) => <PackageActions c={c} templates={templates} fileNames={fileNames} last={packages.length === 1} /> : undefined}
+        footer={footer}
+      />
+    </article>
+  );
+}
+
+/** Ubah, salin, dan hapus satu paket, di kepala kolomnya. */
+function PackageActions({ c, templates, fileNames, last }: { c: PackageColumn; templates: { label: string; offer: Offer }[]; fileNames: Record<string, string>; last: boolean }) {
+  const name = c.pkg.packageName || "paket ini";
+  return (
+    <span className="-ml-2.5 flex">
+      <FormDialog
+        variant="icon"
+        triggerLabel={`Ubah ${name}`}
+        wide
+        title={`Ubah ${name}`}
+        action={updatePackage.bind(null, c.pkg.id)}
+        trigger={<Pencil size={14} aria-hidden="true" />}
+      >
+        <PackageFields vendor={c.vendor} o={c.pkg} templates={templates} fileName={c.pkg.attachmentFileId ? fileNames[c.pkg.attachmentFileId] : undefined} />
+      </FormDialog>
+      <ActionButton variant="icon" label={`Salin ${name}`} action={duplicatePackage.bind(null, c.pkg.id)}>
+        <Copy size={14} aria-hidden="true" />
+      </ActionButton>
+      <ActionButton
+        variant="icon"
+        label={`Hapus ${name}`}
+        confirm={last ? `Hapus ${name}? Ini paket terakhir, jadi ${c.vendor.name} ikut terhapus dari perbandingan.` : `Hapus ${name}?`}
+        action={deletePackage.bind(null, c.pkg.id)}
+      >
+        {last ? <X size={14} aria-hidden="true" /> : <Trash2 size={14} aria-hidden="true" />}
+      </ActionButton>
+    </span>
   );
 }
 
@@ -314,56 +398,36 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function DeleteOffer({ o, onDone }: { o: Offer; onDone: () => void }) {
-  const [pending, start] = useTransition();
-  const dialogs = useConfirm();
-  return (
-    <button
-      type="button"
-      disabled={pending}
-      aria-label={`Hapus penawaran ${o.vendorName}`}
-      onClick={async () => {
-        const yes = await dialogs.confirm({ title: `Hapus penawaran ${o.vendorName}?`, confirmLabel: "Hapus", destructive: true });
-        if (!yes) return;
-        start(async () => {
-          const r = await deleteOffer(o.id);
-          if (!r.ok) await dialogs.alert({ title: "Belum berhasil", description: r.error });
-          else onDone();
-        });
-      }}
-      className="inline-flex size-11 items-center justify-center rounded-xl hover:bg-ground disabled:opacity-50"
-    >
-      <Trash2 size={15} aria-hidden="true" />
-    </button>
-  );
-}
-
 function SaveDialog({
-  open,
-  offer,
+  column: { pkg, vendor },
   defaults,
   onClose,
   onSaved,
 }: {
-  open: boolean;
-  offer: Offer;
+  column: PackageColumn;
   defaults: { dpDue: string; settleDue: string };
   onClose: () => void;
   onSaved: (msg: string) => void;
 }) {
-  const total = offerTotal(offer);
-  const dp = dpValue(offer);
+  const total = offerTotal(pkg);
+  const dpInput = effectiveDp(pkg, vendor);
+  const dp = dpValue(dpInput);
   const [state, action, pending] = useActionState(async (_p: ActionResult | null, fd: FormData) => {
-    const r = await chooseOffer(offer.id, fd);
+    const r = await chooseOffer(pkg.id, fd);
     if (r.ok) onSaved(r.message ?? "Tersimpan.");
     return r;
   }, null);
   return (
-    <Modal open={open} onClose={onClose} title={`Pesan ${offer.vendorName}`} description="Penawaran menjadi vendor terpesan dan termin pembayarannya masuk ke Budget.">
+    <Modal
+      open
+      onClose={onClose}
+      title={`Pesan ${vendor.name}${pkg.packageName ? `, ${pkg.packageName}` : ""}`}
+      description="Paket ini menjadi vendor terpesan dan termin pembayarannya masuk ke Budget."
+    >
       <form onSubmit={submitWith(action)} className="flex flex-col gap-4">
         <dl className="grid grid-cols-2 gap-3 rounded-[14px] bg-sunken p-3.5 text-[13px]">
-          <Row label={offer.addons.length ? "Total paket + add-on" : "Total"}>{rupiah(total)}</Row>
-          <Row label={dpLabel(offer)}>{dp > 0 ? rupiah(dp) : "Tidak ada DP"}</Row>
+          <Row label={pkg.addons.length ? "Total paket + add-on" : "Total"}>{rupiah(total)}</Row>
+          <Row label={dpLabel(dpInput)}>{dp > 0 ? rupiah(dp) : "Tidak ada DP"}</Row>
         </dl>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {dp > 0 && (
@@ -379,8 +443,8 @@ function SaveDialog({
         </div>
         {state && !state.ok && (
           <Alert variant="warn">
-<AlertDescription>{state.error}</AlertDescription>
-</Alert>
+            <AlertDescription>{state.error}</AlertDescription>
+          </Alert>
         )}
         <div className="flex justify-end gap-2">
           <Button variant="ground" onClick={onClose}>

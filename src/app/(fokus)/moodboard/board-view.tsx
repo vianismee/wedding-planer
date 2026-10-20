@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import type { MoodData, MoodEdge, MoodMedia, MoodNode } from "@/db/schema";
-import { MOOD_FONTS, sourceName, type MoodFont, type MoodRect } from "@/lib/moodboard";
+import { cleanParents, MOOD_FONTS, sourceName, type MoodFont, type MoodRect } from "@/lib/moodboard";
 import { cx } from "@/components/kit";
 import { Modal } from "@/components/forms";
 import { BrandingCard } from "@/components/ui/color-palette";
@@ -20,6 +20,7 @@ export const DEFAULT_SIZE: Record<string, { w: number; h: number }> = {
   shape: { w: 160, h: 120 },
   draw: { w: 40, h: 40 },
   media: { w: 260, h: 312 },
+  frame: { w: 400, h: 300 },
 };
 
 // Tinggi baris judul di bawah foto kartu media. Sisa tinggi kartu mengikuti rasio foto pertama.
@@ -78,6 +79,83 @@ export function curve(a: MoodRect, b: MoodRect) {
     mx: (p0.x + 3 * c1.x + 3 * c2.x + p3.x) / 8,
     my: (p0.y + 3 * c1.y + 3 * c2.y + p3.y) / 8,
   };
+}
+
+/* ---------- Frame ---------- */
+
+/**
+ * Urutan gambar elemen: yang langsung di kanvas menurut urutan daftar, dan isi frame digambar
+ * tepat setelah frame-nya. Jadi isi frame selalu di atas latar frame, apa pun urutannya di daftar.
+ */
+export function drawOrder(nodes: MoodNode[]) {
+  const kids = new Map<string | undefined, MoodNode[]>();
+  for (const n of cleanParents(nodes)) {
+    const list = kids.get(n.parent) ?? [];
+    list.push(n);
+    kids.set(n.parent, list);
+  }
+  const out: MoodNode[] = [];
+  const walk = (p?: string) => {
+    for (const n of kids.get(p) ?? []) {
+      out.push(n);
+      if (n.type === "frame") walk(n.id);
+    }
+  };
+  walk(undefined);
+  return out;
+}
+
+/** Rantai frame di atas elemen, dari yang terdekat. */
+export function ancestors(n: MoodNode, byId: Map<string, MoodNode>) {
+  const out: MoodNode[] = [];
+  let p = n.parent;
+  while (p && out.length < 50) {
+    const f = byId.get(p);
+    if (!f || out.includes(f)) break;
+    out.push(f);
+    p = f.parent;
+  }
+  return out;
+}
+
+/** Area tempat elemen boleh terlihat: irisan semua frame di atasnya yang memotong isi. Null = tidak dipotong. */
+export function frameClip(n: MoodNode, byId: Map<string, MoodNode>, box: (n: MoodNode) => MoodRect): MoodRect | null {
+  let r: MoodRect | null = null;
+  for (const f of ancestors(n, byId)) {
+    if (f.clip === false) continue;
+    const b = box(f);
+    if (!r) r = b;
+    else {
+      const x = Math.max(r.x, b.x);
+      const y = Math.max(r.y, b.y);
+      r = { x, y, w: Math.max(0, Math.min(r.x + r.w, b.x + b.w) - x), h: Math.max(0, Math.min(r.y + r.h, b.y + b.h) - y) };
+    }
+  }
+  return r;
+}
+
+/** clip-path untuk elemen di kotak `b` supaya hanya bagian di dalam `r` yang terlihat. Undefined bila tidak ada yang terpotong. */
+export function clipPath(b: MoodRect, r: MoodRect | null) {
+  if (!r || (b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h)) return undefined;
+  const x0 = r.x - b.x;
+  const y0 = r.y - b.y;
+  return `polygon(${x0}px ${y0}px, ${x0 + r.w}px ${y0}px, ${x0 + r.w}px ${y0 + r.h}px, ${x0}px ${y0 + r.h}px)`;
+}
+
+/** Latar frame dan namanya di atas sudut kiri. Ukuran nama tetap di layar, berapa pun zoom-nya. */
+export function FrameBody({ n, zoom }: { n: MoodNode; zoom: number }) {
+  return (
+    <>
+      <div className="absolute inset-0" style={{ background: n.fill ?? "#ffffff" }} />
+      <div
+        data-frame-label=""
+        className="absolute bottom-full left-0 max-w-full truncate whitespace-nowrap font-semibold text-muted"
+        style={{ fontSize: 12 / zoom, paddingBottom: 4 / zoom }}
+      >
+        {n.title || "Frame"}
+      </div>
+    </>
+  );
 }
 
 /** Elemen yang dipakai sebagai kartu (bisa disambung, punya judul dan tag). */
@@ -149,6 +227,7 @@ export function PhotoCard({
         {src && (
           <button
             type="button"
+            data-ui=""
             aria-label={`Lihat foto ${n.title} penuh`}
             title="Lihat foto penuh (atau klik dua kali kartu)"
             onPointerDown={(e) => e.stopPropagation()}
@@ -258,12 +337,12 @@ export function MediaCard({
               {cur + 1}/{items.length}
             </span>
             {cur > 0 && (
-              <button type="button" aria-label="Sebelumnya" onPointerDown={stop} onClick={() => go(-1)} className={cx(arrow, "left-1.5")}>
+              <button type="button" data-ui="" aria-label="Sebelumnya" onPointerDown={stop} onClick={() => go(-1)} className={cx(arrow, "left-1.5")}>
                 <ChevronLeft size={16} aria-hidden="true" />
               </button>
             )}
             {cur < items.length - 1 && (
-              <button type="button" aria-label="Berikutnya" onPointerDown={stop} onClick={() => go(1)} className={cx(arrow, "right-1.5")}>
+              <button type="button" data-ui="" aria-label="Berikutnya" onPointerDown={stop} onClick={() => go(1)} className={cx(arrow, "right-1.5")}>
                 <ChevronRight size={16} aria-hidden="true" />
               </button>
             )}
@@ -278,6 +357,7 @@ export function MediaCard({
           type="button"
           aria-label={`Lihat ${n.title || "media"} penuh`}
           title="Lihat penuh (atau klik dua kali kartu)"
+          data-ui=""
           onPointerDown={stop}
           onClick={onOpen}
           className={cx("absolute right-2 top-2 flex size-8 items-center justify-center rounded-lg bg-ink/80 text-white transition-opacity duration-150 hover:bg-ink", reveal)}
@@ -318,6 +398,7 @@ function MediaVideo({ src, active }: { src: string; active: boolean }) {
       />
       <button
         type="button"
+        data-ui=""
         aria-label={playing ? "Jeda video" : "Putar video"}
         onPointerDown={stop}
         onClick={() => (playing ? ref.current?.pause() : void ref.current?.play().catch(() => {}))}

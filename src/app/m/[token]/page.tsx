@@ -46,7 +46,7 @@ export default async function MoodboardSharePage({ params }: { params: Promise<{
           Akad {dateLong(w.akadDate)}, {w.city}. Halaman ini hanya untuk dilihat.
         </p>
       </header>
-      <MoodboardViewer data={board.data} token={token} />
+      <MoodboardViewer data={board.data} fileBase={`/m/${token}/foto/`} />
     </main>
   );
 }

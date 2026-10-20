@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { auth } from "./auth";
 import { db, schema } from "@/db";
-import { can, type Area, type Role } from "./roles";
+import { can, homeFor, normalize, resolvePerms, type Area, type Perms, type RoleDef } from "./roles";
 
 export const WEDDING_COOKIE = "rukun_wedding";
 
@@ -22,7 +22,10 @@ export async function requireUser() {
 export type Ctx = {
   user: { id: string; name: string; email: string };
   wedding: schema.Wedding;
-  member: schema.Member & { role: Role };
+  member: schema.Member;
+  // Izin akhir anggota ini (peran ditambah pengecualian pribadinya), dan peran yang disimpan untuk pernikahan ini.
+  perms: Perms;
+  roles: RoleDef[];
 };
 
 /** Ruang pernikahan aktif untuk pengguna ini, atau null bila belum punya. */
@@ -39,30 +42,41 @@ export const getContext = cache(async (): Promise<Ctx | null> => {
     .orderBy(asc(schema.member.createdAt));
   if (rows.length === 0) return null;
   const row = rows.find((r) => r.wedding.id === preferred) ?? rows[0];
+  const saved = await db.select().from(schema.weddingRole).where(eq(schema.weddingRole.weddingId, row.wedding.id));
+  const roles = saved.map((r) => ({ key: r.key, name: r.name, perms: normalize(r.perms) }));
   return {
     user: { id: session.user.id, name: session.user.name, email: session.user.email },
     wedding: row.wedding,
-    member: row.member as Ctx["member"],
+    member: row.member,
+    perms: resolvePerms(row.member.role, row.member.perms, roles),
+    roles,
   };
 });
 
-/** Untuk halaman: arahkan ke login/onboarding bila perlu, dan tolak bila peran tidak berhak. */
-export async function requirePage(area: Area): Promise<Ctx> {
+/**
+ * Untuk halaman: arahkan ke login/onboarding bila perlu, dan ke halaman lain yang boleh dibuka bila
+ * izinnya "Tidak ada". Tanpa `area`, cukup jadi anggota (dipakai Pengaturan untuk akun pribadi).
+ */
+export async function requirePage(area?: Area): Promise<Ctx> {
   const session = await getSession();
   if (!session) redirect("/masuk");
   const ctx = await getContext();
   if (!ctx) redirect("/onboarding");
-  if (!can(ctx.member.role, area)) redirect(ctx.member.role === "panitia" ? "/acara" : "/dashboard");
+  if (area && !can(ctx.perms, area)) redirect(homeFor(ctx.perms));
   return ctx;
 }
 
 export class ForbiddenError extends Error {}
 
-/** Untuk server action dan route handler: selalu dicek di server, tidak hanya di UI. */
-export async function requireAction(area: Area): Promise<Ctx> {
+/**
+ * Untuk server action dan route handler yang mengubah data: butuh izin "Ubah". Selalu dicek di
+ * server, tidak hanya dengan menyembunyikan tombol di UI.
+ */
+export async function requireAction(area: Area, need: "view" | "edit" = "edit"): Promise<Ctx> {
   const ctx = await getContext();
   if (!ctx) throw new ForbiddenError("Kamu belum masuk atau belum punya ruang pernikahan.");
-  if (!can(ctx.member.role, area)) throw new ForbiddenError("Peranmu tidak punya akses ke bagian ini.");
+  if (!can(ctx.perms, area, need))
+    throw new ForbiddenError(can(ctx.perms, area) ? "Kamu hanya bisa melihat bagian ini, tidak mengubahnya." : "Kamu tidak punya akses ke bagian ini.");
   return ctx;
 }
 

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
-import { can } from "@/lib/roles";
+import { can, type Area } from "@/lib/roles";
 import {
   addDays,
   dateLong,
@@ -38,9 +38,10 @@ export default async function DashboardPage() {
   const w = ctx.wedding;
   const wid = w.id;
   const today = todayISO();
-  const seeMoney = can(ctx.member.role, "budget");
+  const seeMoney = can(ctx.perms, "budget");
+  const see = (a: Area) => can(ctx.perms, a);
 
-  const [events, cats, expenses, terms, tasks, guests, docs, items, schedules, vendors] = await Promise.all([
+  const [allEvents, cats, expenses, terms, allTasks, guests, docs, items, allSchedules, vendors] = await Promise.all([
     db.select().from(schema.event).where(eq(schema.event.weddingId, wid)).orderBy(asc(schema.event.date), asc(schema.event.sortOrder)),
     db.select().from(schema.budgetCategory).where(eq(schema.budgetCategory.weddingId, wid)).orderBy(asc(schema.budgetCategory.sortOrder)),
     db.select().from(schema.expense).where(eq(schema.expense.weddingId, wid)),
@@ -58,6 +59,10 @@ export default async function DashboardPage() {
     db.select({ id: schema.vendor.id, name: schema.vendor.name }).from(schema.vendor).where(eq(schema.vendor.weddingId, wid)),
   ]);
   const vendorName = new Map(vendors.map((v) => [v.id, v.name]));
+  // Beranda hanya merangkum halaman yang boleh dilihat anggota ini. "Tugas sendiri" hanya melihat tugasnya.
+  const events = see("acara") ? allEvents : [];
+  const schedules = see("jadwal") ? allSchedules : [];
+  const tasks = !see("checklist") ? [] : ctx.perms.checklist === "own" ? allTasks.filter((t) => t.assigneeMemberId === ctx.member.id) : allTasks;
 
   const daysLeft = diffDays(today, w.akadDate);
   const akad = events.find((e) => e.kind === "akad");
@@ -177,26 +182,28 @@ export default async function DashboardPage() {
   // Progres
   const pax = guests.reduce((s, g) => s + g.pax, 0);
   const quota = w.quotaGroom + w.quotaBride;
-  const progress: { title: string; href: string; icon: LucideIcon; label: string; value: string; pct: number }[] = [
-    { title: "Daftar tamu", href: "/tamu", icon: Users, label: "Terdaftar", value: `${number(pax)} dari ${number(quota)} orang`, pct: quota ? (pax / quota) * 100 : 0 },
-    {
+  const progress: { title: string; href: string; icon: LucideIcon; label: string; value: string; pct: number }[] = [];
+  if (see("tamu"))
+    progress.push({ title: "Daftar tamu", href: "/tamu", icon: Users, label: "Terdaftar", value: `${number(pax)} dari ${number(quota)} orang`, pct: quota ? (pax / quota) * 100 : 0 });
+  if (see("checklist"))
+    progress.push({
       title: "Checklist",
       href: "/checklist",
       icon: ListChecks,
       label: "Selesai",
       value: `${tasks.filter((t) => t.done).length} dari ${tasks.length} tugas`,
       pct: tasks.length ? (tasks.filter((t) => t.done).length / tasks.length) * 100 : 0,
-    },
-    {
+    });
+  if (see("seserahan"))
+    progress.push({
       title: "Seserahan",
       href: "/seserahan",
       icon: Gift,
       label: "Terbeli",
       value: `${items.filter((i) => i.status === "terbeli").length} dari ${items.length} item`,
       pct: items.length ? (items.filter((i) => i.status === "terbeli").length / items.length) * 100 : 0,
-    },
-  ];
-  if (can(ctx.member.role, "dokumen"))
+    });
+  if (see("dokumen"))
     progress.push({
       title: "Dokumen nikah",
       href: "/dokumen",
@@ -223,55 +230,57 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 gap-6 min-[1200px]:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-6">
           {/* Rangkaian acara */}
-          <section className="flex flex-col gap-3" aria-labelledby="acara-title">
-            <SectionTitle
-              id="acara-title"
-              aside={
-                <Link href="/acara" className="text-[13px] font-semibold underline-offset-2 hover:underline">
-                  Lihat semua acara
-                </Link>
-              }
-            >
-              Rangkaian acara
-            </SectionTitle>
-            {showEvents.length === 0 ? (
-              <Empty title="Belum ada acara." action={<LinkButton href="/acara">Tambah acara</LinkButton>}>
-                Tambahkan acara pertama supaya keluarga tahu jadwalnya.
-              </Empty>
-            ) : (
-              <div className="-mx-1 grid snap-x snap-mandatory auto-cols-[80%] grid-flow-col gap-4 overflow-x-auto px-1 pb-1 min-[720px]:grid-flow-row min-[720px]:grid-cols-3 min-[720px]:overflow-visible">
-                {showEvents.map((e) => {
-                  const Icon = eventIcon(e.kind);
-                  const tone = eventTone(e.kind);
-                  return (
-                    <Link
-                      key={e.id}
-                      href={`/acara?e=${e.id}`}
-                      className="flex snap-start flex-col gap-4 rounded-[22px] bg-surface p-[18px] no-underline transition-colors duration-150 hover:bg-[#fbfbfd]"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className={cx("flex size-[42px] shrink-0 items-center justify-center rounded-full", tone)}>
-                          <Icon size={18} aria-hidden="true" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="truncate text-[14px] font-bold">{e.name}</div>
-                          <div className="text-[12px] text-muted">{dateShort(e.date)}</div>
+          {see("acara") && (
+            <section className="flex flex-col gap-3" aria-labelledby="acara-title">
+              <SectionTitle
+                id="acara-title"
+                aside={
+                  <Link href="/acara" className="text-[13px] font-semibold underline-offset-2 hover:underline">
+                    Lihat semua acara
+                  </Link>
+                }
+              >
+                Rangkaian acara
+              </SectionTitle>
+              {showEvents.length === 0 ? (
+                <Empty title="Belum ada acara." action={can(ctx.perms, "acara", "edit") && <LinkButton href="/acara">Tambah acara</LinkButton>}>
+                  {can(ctx.perms, "acara", "edit") ? "Tambahkan acara pertama supaya keluarga tahu jadwalnya." : "Acara akan muncul di sini setelah ditambahkan."}
+                </Empty>
+              ) : (
+                <div className="-mx-1 grid snap-x snap-mandatory auto-cols-[80%] grid-flow-col gap-4 overflow-x-auto px-1 pb-1 min-[720px]:grid-flow-row min-[720px]:grid-cols-3 min-[720px]:overflow-visible">
+                  {showEvents.map((e) => {
+                    const Icon = eventIcon(e.kind);
+                    const tone = eventTone(e.kind);
+                    return (
+                      <Link
+                        key={e.id}
+                        href={`/acara?e=${e.id}`}
+                        className="flex snap-start flex-col gap-4 rounded-[22px] bg-surface p-[18px] no-underline transition-colors duration-150 hover:bg-[#fbfbfd]"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={cx("flex size-[42px] shrink-0 items-center justify-center rounded-full", tone)}>
+                            <Icon size={18} aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate text-[14px] font-bold">{e.name}</div>
+                            <div className="text-[12px] text-muted">{dateShort(e.date)}</div>
+                          </div>
                         </div>
-                      </div>
-                      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-4">
-                        {e.status === "selesai" ? (
-                          <Meta label="Status">Selesai</Meta>
-                        ) : (
-                          <Meta label="Waktu">{e.startTime ? `${time(e.startTime)} WIB` : "Belum diisi"}</Meta>
-                        )}
-                        <Meta label="Lokasi">{e.location || "Belum diisi"}</Meta>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-4">
+                          {e.status === "selesai" ? (
+                            <Meta label="Status">Selesai</Meta>
+                          ) : (
+                            <Meta label="Waktu">{e.startTime ? `${time(e.startTime)} WIB` : "Belum diisi"}</Meta>
+                          )}
+                          <Meta label="Lokasi">{e.location || "Belum diisi"}</Meta>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           <div className={cx("grid grid-cols-1 gap-4", seeMoney && "min-[720px]:grid-cols-2")}>
             {seeMoney && (
@@ -372,37 +381,39 @@ export default async function DashboardPage() {
             </section>
           </div>
 
-          <Card className="flex flex-col gap-2" aria-labelledby="progres-title">
-            <SectionTitle id="progres-title">Progres persiapan</SectionTitle>
-            <ul className="flex flex-col">
-              {progress.map((p) => {
-                const Icon = p.icon;
-                return (
-                  <li key={p.title} className="border-b border-ground last:border-0">
-                    <Link
-                      href={p.href}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 py-3 no-underline min-[720px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(120px,1fr)]"
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-ground">
-                          <Icon size={18} aria-hidden="true" />
+          {progress.length > 0 && (
+            <Card className="flex flex-col gap-2" aria-labelledby="progres-title">
+              <SectionTitle id="progres-title">Progres persiapan</SectionTitle>
+              <ul className="flex flex-col">
+                {progress.map((p) => {
+                  const Icon = p.icon;
+                  return (
+                    <li key={p.title} className="border-b border-ground last:border-0">
+                      <Link
+                        href={p.href}
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 py-3 no-underline min-[720px]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(120px,1fr)]"
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-ground">
+                            <Icon size={18} aria-hidden="true" />
+                          </span>
+                          <span className="truncate text-[14px] font-bold">{p.title}</span>
                         </span>
-                        <span className="truncate text-[14px] font-bold">{p.title}</span>
-                      </span>
-                      <span className="text-right min-[720px]:text-left">
-                        <span className="block text-[11px] font-semibold text-muted">{p.label}</span>
-                        <span className="block text-[13px] font-bold">{p.value}</span>
-                      </span>
-                      <span className="col-span-2 flex items-center gap-3 min-[720px]:col-span-1">
-                        <Progress value={p.pct} className="flex-1" label={`${p.title} ${Math.round(p.pct)}%`} />
-                        <span className="w-10 text-right text-[13px] font-bold tabular">{Math.round(Math.min(p.pct, 999))}%</span>
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
+                        <span className="text-right min-[720px]:text-left">
+                          <span className="block text-[11px] font-semibold text-muted">{p.label}</span>
+                          <span className="block text-[13px] font-bold">{p.value}</span>
+                        </span>
+                        <span className="col-span-2 flex items-center gap-3 min-[720px]:col-span-1">
+                          <Progress value={p.pct} className="flex-1" label={`${p.title} ${Math.round(p.pct)}%`} />
+                          <span className="w-10 text-right text-[13px] font-bold tabular">{Math.round(Math.min(p.pct, 999))}%</span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
         </div>
 
         {/* Kolom kanan */}
@@ -421,16 +432,18 @@ export default async function DashboardPage() {
               <br />
               {dateLong(w.akadDate)}
             </div>
-            <Link
-              href={akad ? `/acara?e=${akad.id}` : "/acara"}
-              className="relative mt-2 inline-flex h-11 items-center self-start rounded-xl bg-white px-4 text-[13px] font-bold text-ink no-underline hover:bg-[#ececf3]"
-            >
-              Lihat rundown akad
-            </Link>
+            {see("acara") && (
+              <Link
+                href={akad ? `/acara?e=${akad.id}` : "/acara"}
+                className="relative mt-2 inline-flex h-11 items-center self-start rounded-xl bg-white px-4 text-[13px] font-bold text-ink no-underline hover:bg-[#ececf3]"
+              >
+                Lihat rundown akad
+              </Link>
+            )}
           </Card>
 
           <Card>
-            <ScheduleCalendar akadDate={w.akadDate} items={calendarItems} vendors={vendors} canEdit />
+            <ScheduleCalendar akadDate={w.akadDate} items={calendarItems} vendors={vendors} canEdit={can(ctx.perms, "jadwal", "edit")} />
           </Card>
 
           {seeMoney && (

@@ -5,6 +5,7 @@ import { and, eq, ilike } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireAction } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
 import { parseRupiah } from "@/lib/format";
 import { computeCatering } from "@/lib/catering";
@@ -60,7 +61,7 @@ function done() {
 
 export async function addPlan(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("budget");
+    const ctx = await requireAction("catering");
     await db.insert(schema.cateringPlan).values({ ...parse(fd), weddingId: ctx.wedding.id });
     done();
   });
@@ -68,7 +69,7 @@ export async function addPlan(fd: FormData): Promise<ActionResult> {
 
 export async function updatePlan(id: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("budget");
+    const ctx = await requireAction("catering");
     const [row] = await db
       .update(schema.cateringPlan)
       .set(parse(fd))
@@ -81,7 +82,7 @@ export async function updatePlan(id: string, fd: FormData): Promise<ActionResult
 
 export async function deletePlan(id: string): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("budget");
+    const ctx = await requireAction("catering");
     await db.delete(schema.cateringPlan).where(and(eq(schema.cateringPlan.id, id), eq(schema.cateringPlan.weddingId, ctx.wedding.id)));
     done();
   });
@@ -90,7 +91,9 @@ export async function deletePlan(id: string): Promise<ActionResult> {
 /** Menjadikan total skenario sebagai alokasi kategori Catering di Budget (dibuat bila belum ada). */
 export async function applyPlanToBudget(id: string): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("budget");
+    const ctx = await requireAction("catering");
+    // Mengubah alokasi di Budget, jadi butuh izin ubah Budget juga.
+    if (!can(ctx.perms, "budget", "edit")) throw new UserError("Butuh akses ubah Budget untuk mengubah alokasi Catering.");
     const wid = ctx.wedding.id;
     const [plan] = await db
       .select()

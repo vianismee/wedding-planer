@@ -6,9 +6,11 @@ import { SelectField } from "@/components/select-field";
 import { FileInput } from "@/components/file-input";
 import { Button, Field, Input, Textarea, cx } from "@/components/kit";
 import { parseRupiah, rupiah } from "@/lib/format";
-import type { Offer, OfferAddon, Vendor } from "@/db/schema";
+import { dpText } from "@/lib/offer";
+import type { Offer, OfferAddon, Prospect, Vendor } from "@/db/schema";
 
 type Cat = { id: string; name: string };
+type Dp = { dpType: string; dpPercent: number; dpAmount: number };
 type AddonRow = { label: string; qty: string; price: string };
 
 /* ---------- Editor paket: harga, isi paket (daftar), add-on, total ---------- */
@@ -164,7 +166,7 @@ function TotalSummary({ pkg, extra }: { pkg: Pkg; extra?: React.ReactNode }) {
 
 /* ---------- DP: persen, nominal, atau tanpa DP ---------- */
 
-function DpEditor({ total, o }: { total: number; o?: Offer }) {
+function DpEditor({ total, o, label = "DP saat booking" }: { total: number; o?: Dp; label?: string }) {
   const [type, setType] = useState(o?.dpType ?? "percent");
   const [pct, setPct] = useState(String(o?.dpPercent ?? 30));
   const [amount, setAmount] = useState(o?.dpAmount ? String(o.dpAmount) : "");
@@ -173,7 +175,7 @@ function DpEditor({ total, o }: { total: number; o?: Offer }) {
   return (
     <div className="flex flex-col gap-2">
       <input type="hidden" name="dpType" value={type} />
-      <span className="text-[12px] font-semibold text-muted">DP saat booking</span>
+      <span className="text-[12px] font-semibold text-muted">{label}</span>
       <div role="group" aria-label="Cara DP" className="grid grid-cols-3 gap-1 rounded-xl bg-ground p-1">
         {(
           [
@@ -208,60 +210,167 @@ function DpEditor({ total, o }: { total: number; o?: Offer }) {
       )}
       <p className="text-[12px] text-muted">
         {type === "none"
-          ? "Tidak ada DP. Saat penawaran dipilih, seluruh total dijadwalkan sebagai pelunasan."
-          : `DP ${rupiah(dp)}, sisa pelunasan ${rupiah(Math.max(0, total - dp))}.`}
+          ? "Tidak ada DP. Saat paket dipilih, seluruh total dijadwalkan sebagai pelunasan."
+          : total > 0
+            ? `Untuk paket ini: DP ${rupiah(dp)}, sisa pelunasan ${rupiah(Math.max(0, total - dp))}.`
+            : "Nominal DP dihitung dari total paket yang dipilih."}
       </p>
     </div>
   );
 }
 
-/* ---------- Form penawaran ---------- */
+/* ---------- Form calon vendor dan paket ---------- */
 
-export function OfferFields({ cats, categoryId, o, fileName }: { cats: Cat[]; categoryId: string; o?: Offer; fileName?: string }) {
-  const pkg = usePackage({ price: o?.price, items: o?.includeItems, addons: o?.addons });
+/** Info calon vendor: berlaku untuk semua paketnya. */
+function ProspectInfo({ cats, categoryId, p }: { cats: Cat[]; categoryId: string; p?: Prospect }) {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Field label="Nama vendor">
+        <Input name="vendorName" required defaultValue={p?.name} placeholder="Contoh: Dapur Ibu" />
+      </Field>
+      <Field label="Kategori">
+        <SelectField name="categoryId" defaultValue={p?.categoryId ?? categoryId} options={cats.map((c) => ({ value: c.id, label: c.name }))} />
+      </Field>
+      <Field label="Kontak">
+        <Input name="contact" defaultValue={p?.contact ?? ""} placeholder="No. WhatsApp" />
+      </Field>
+      <Field label="Ketersediaan tanggal">
+        <SelectField
+          name="available"
+          defaultValue={p && !p.available ? "belum" : "ya"}
+          options={[
+            { value: "ya", label: "Tersedia" },
+            { value: "belum", label: "Belum dikonfirmasi" },
+          ]}
+        />
+      </Field>
+      <Field label="Keterangan ketersediaan">
+        <Input name="availability" defaultValue={p?.availability ?? ""} placeholder="Contoh: Tersedia 13 dan 14 Feb" />
+      </Field>
+      <Field label="Catatan vendor">
+        <Input name="vendorNotes" defaultValue={p?.notes ?? ""} placeholder="Contoh: Rekomendasi keluarga" />
+      </Field>
+    </div>
+  );
+}
+
+function PackageBasics({ pkg, o }: { pkg: Pkg; o?: Pick<Offer, "packageName"> }) {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <Field label="Nama paket">
+        <Input name="packageName" defaultValue={o?.packageName ?? ""} placeholder="Contoh: Paket Silver" />
+      </Field>
+      <PackagePrice pkg={pkg} />
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="border-t border-ground pt-4 text-[14px] font-bold first:border-0 first:pt-0">{children}</h3>;
+}
+
+/** Calon vendor baru beserta paket pertamanya. DP diisi di level vendor dan berlaku untuk semua paket. */
+export function NewProspectFields({ cats, categoryId }: { cats: Cat[]; categoryId: string }) {
+  const pkg = usePackage({});
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Nama vendor">
-          <Input name="vendorName" required defaultValue={o?.vendorName} placeholder="Contoh: Vendor A" />
-        </Field>
-        <Field label="Nama paket">
-          <Input name="packageName" defaultValue={o?.packageName ?? ""} placeholder="Contoh: Paket prasmanan 800 porsi" />
-        </Field>
-        <Field label="Kategori">
-          <SelectField name="categoryId" defaultValue={categoryId} options={cats.map((c) => ({ value: c.id, label: c.name }))} />
-        </Field>
-        <PackagePrice pkg={pkg} />
-      </div>
+      <SectionLabel>Vendor</SectionLabel>
+      <ProspectInfo cats={cats} categoryId={categoryId} />
+      <DpEditor total={pkg.total} label="DP bawaan untuk semua paket" />
+      <SectionLabel>Paket pertama</SectionLabel>
+      <PackageBasics pkg={pkg} />
       <PackageLists pkg={pkg} />
       <TotalSummary pkg={pkg} />
-      <DpEditor total={pkg.total} o={o} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Ketersediaan tanggal">
+      <Field label="Catatan paket">
+        <Input name="notes" placeholder="Contoh: Harga berlaku sampai Maret" />
+      </Field>
+      <FileInput name="attachmentFileId" kind="offer" label="Brosur atau penawaran (opsional)" current={null} />
+      <p className="text-[12px] text-muted">Paket lain dari vendor ini bisa ditambahkan setelah disimpan.</p>
+    </>
+  );
+}
+
+/** Ubah info calon vendor. `total` dipakai untuk contoh hitungan DP (paket termurahnya). */
+export function ProspectFields({ cats, p, total }: { cats: Cat[]; p: Prospect; total: number }) {
+  return (
+    <>
+      <ProspectInfo cats={cats} categoryId={p.categoryId} p={p} />
+      <DpEditor total={total} o={p} label="DP bawaan untuk semua paket" />
+      <p className="text-[12px] text-muted">Pindah kategori membawa semua paket vendor ini.</p>
+    </>
+  );
+}
+
+/**
+ * Isian satu paket. Paket baru bisa mulai dari salinan paket lain (dari vendor mana pun di kategori
+ * ini), supaya teks isi paket sama persis dan tabel perbandingan bisa mencocokkannya.
+ */
+export function PackageFields({
+  vendor,
+  o,
+  fileName,
+  templates = [],
+}: {
+  vendor: Prospect;
+  o?: Offer;
+  fileName?: string;
+  templates?: { label: string; offer: Offer }[];
+}) {
+  const [source, setSource] = useState("");
+  const from = o ?? templates.find((t) => t.offer.id === source)?.offer;
+  return (
+    <>
+      {!o && templates.length > 0 && (
+        <Field label="Mulai dari" hint="Salin isi dan add-on paket lain, lalu ubah bedanya saja.">
           <SelectField
-            name="available"
-            defaultValue={o && !o.available ? "belum" : "ya"}
-            options={[
-              { value: "ya", label: "Tersedia" },
-              { value: "belum", label: "Belum dikonfirmasi" },
-            ]}
+            aria-label="Mulai dari"
+            value={source}
+            onValueChange={setSource}
+            options={[{ value: "", label: "Kosong" }, ...templates.map((t) => ({ value: t.offer.id, label: `Salin ${t.label}` }))]}
           />
         </Field>
-        <Field label="Keterangan ketersediaan">
-          <Input name="availability" defaultValue={o?.availability ?? ""} placeholder="Contoh: Tersedia 13 dan 14 Feb" />
-        </Field>
-        <Field label="Catatan">
-          <Input name="notes" defaultValue={o?.notes ?? ""} placeholder="Contoh: Rekomendasi keluarga" />
-        </Field>
-        <Field label="Kontak">
-          <Input name="contact" defaultValue={o?.contact ?? ""} placeholder="No. WhatsApp" />
-        </Field>
+      )}
+      {/* Ganti sumber salinan: isi formulir dibuat ulang dari paket itu. */}
+      <PackageEditor key={from?.id ?? "kosong"} vendor={vendor} o={from} copy={!o && !!from} fileName={o ? fileName : undefined} />
+    </>
+  );
+}
+
+function PackageEditor({ vendor, o, copy, fileName }: { vendor: Prospect; o?: Offer; copy: boolean; fileName?: string }) {
+  const pkg = usePackage({ price: o?.price, items: o?.includeItems, addons: o?.addons });
+  const [custom, setCustom] = useState(o?.dpCustom ?? false);
+  return (
+    <>
+      <PackageBasics pkg={pkg} o={copy ? undefined : o} />
+      <PackageLists pkg={pkg} />
+      <TotalSummary pkg={pkg} />
+      <div className="flex flex-col gap-2">
+        <input type="hidden" name="dpCustom" value={custom ? "1" : ""} />
+        <button
+          type="button"
+          aria-pressed={custom}
+          onClick={() => setCustom((c) => !c)}
+          className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-ground px-3 text-left text-[13px] font-bold hover:bg-[#e8e7ef]"
+        >
+          DP berbeda dari vendor
+          <span className={cx("flex h-6 w-10 shrink-0 items-center rounded-full p-0.5 transition-colors duration-150", custom ? "bg-ink" : "bg-[#cfced9]")} aria-hidden="true">
+            <span className={cx("size-5 rounded-full bg-white transition-transform duration-150", custom && "translate-x-4")} />
+          </span>
+        </button>
+        {custom ? (
+          <DpEditor total={pkg.total} o={o?.dpCustom ? o : vendor} label="DP khusus paket ini" />
+        ) : (
+          <p className="text-[12px] text-muted">Mengikuti DP {vendor.name}: {dpText({ price: pkg.total, addons: [], dpType: vendor.dpType, dpPercent: vendor.dpPercent, dpAmount: vendor.dpAmount })}.</p>
+        )}
       </div>
+      <Field label="Catatan paket">
+        <Input name="notes" defaultValue={o?.notes ?? ""} placeholder="Contoh: Harga berlaku sampai Maret" />
+      </Field>
       <FileInput
         name="attachmentFileId"
         kind="offer"
-        label="Lampiran penawaran (opsional)"
-        current={o?.attachmentFileId ? { id: o.attachmentFileId, name: fileName ?? "Lampiran" } : null}
+        label="Brosur atau penawaran (opsional)"
+        current={!copy && o?.attachmentFileId ? { id: o.attachmentFileId, name: fileName ?? "Lampiran" } : null}
       />
     </>
   );

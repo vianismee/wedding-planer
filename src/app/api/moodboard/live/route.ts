@@ -9,7 +9,7 @@ import { leave, snapshot, subscribeMood } from "@/lib/mood-live";
 export async function GET(req: Request) {
   const ctx = await getContext();
   if (!ctx) return new Response(null, { status: 401 });
-  if (!can(ctx.member.role, "moodboard")) return new Response(null, { status: 403 });
+  if (!can(ctx.perms, "moodboard")) return new Response(null, { status: 403 });
   const clientId = new URL(req.url).searchParams.get("client") ?? "";
   if (!/^[\w-]{8,64}$/.test(clientId)) return new Response(null, { status: 400 });
   const weddingId = ctx.wedding.id;

@@ -3,6 +3,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { dateShort, dateShorter, dayMonth, diffDays, relativeDays, rupiah, rupiahShort, todayISO } from "@/lib/format";
 import {
   addCategory,
@@ -18,7 +19,7 @@ import {
 } from "@/actions/budget";
 import { ActionButton, FormDialog } from "@/components/forms";
 import { FileInput } from "@/components/file-input";
-import { Card, Empty, Field, Input, PageHeader, Progress, SectionTitle, Status, cx } from "@/components/kit";
+import { Card, Empty, Field, Input, PageHeader, Progress, SectionTitle, Status, ViewOnly, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
 import type { BudgetCategory, Expense, FundingSource } from "@/db/schema";
@@ -30,6 +31,7 @@ const SIDE_LABEL: Record<string, string> = { pengantin: "Pengantin", pria: "Kelu
 
 export default async function BudgetPage() {
   const ctx = await requirePage("budget");
+  const edit = can(ctx.perms, "budget", "edit");
   const wid = ctx.wedding.id;
   const today = todayISO();
 
@@ -66,35 +68,38 @@ export default async function BudgetPage() {
         title="Budget"
         description="Anggaran, pengeluaran, dan termin vendor dari dana pengantin dan kedua keluarga."
         actions={
-          <>
-            <FormDialog
-              variant="secondary"
-              title="Tambah kategori"
-              action={addCategory}
-              trigger={
-                <>
-                  <Plus size={16} aria-hidden="true" />
-                  Kategori
-                </>
-              }
-            >
-              <CategoryFields />
-            </FormDialog>
-            <FormDialog
-              title="Catat pengeluaran"
-              action={addExpense}
-              trigger={
-                <>
-                  <Plus size={16} aria-hidden="true" />
-                  Catat pengeluaran
-                </>
-              }
-            >
-              <ExpenseFields cats={cats} funding={funding} today={today} />
-            </FormDialog>
-          </>
+          edit && (
+            <>
+              <FormDialog
+                variant="secondary"
+                title="Tambah kategori"
+                action={addCategory}
+                trigger={
+                  <>
+                    <Plus size={16} aria-hidden="true" />
+                    Kategori
+                  </>
+                }
+              >
+                <CategoryFields />
+              </FormDialog>
+              <FormDialog
+                title="Catat pengeluaran"
+                action={addExpense}
+                trigger={
+                  <>
+                    <Plus size={16} aria-hidden="true" />
+                    Catat pengeluaran
+                  </>
+                }
+              >
+                <ExpenseFields cats={cats} funding={funding} today={today} />
+              </FormDialog>
+            </>
+          )
         }
       />
+      {!edit && <ViewOnly what="budget" />}
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
         <Card tone="ink" className="flex flex-col gap-1.5">
@@ -121,7 +126,7 @@ export default async function BudgetPage() {
           <Card className="flex flex-col gap-2" aria-labelledby="kat-title">
             <SectionTitle id="kat-title">Per kategori</SectionTitle>
             {cats.length === 0 ? (
-              <Empty title="Belum ada kategori budget.">Tambahkan kategori seperti Gedung atau Catering beserta alokasinya.</Empty>
+              <Empty title="Belum ada kategori budget.">{edit ? "Tambahkan kategori seperti Gedung atau Catering beserta alokasinya." : "Kategori akan muncul di sini setelah ditambahkan."}</Empty>
             ) : (
               <div className="relative overflow-x-auto">
                 <table className="w-full min-w-[560px] border-collapse text-[13px]">
@@ -132,7 +137,7 @@ export default async function BudgetPage() {
                       <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terpakai</th>
                       <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terikat termin</th>
                       <th scope="col" className="w-[28%] border-b border-line px-3 py-2.5 font-semibold">Progres</th>
-                      <th scope="col" className="border-b border-line py-2.5"><span className="sr-only">Aksi</span></th>
+                      {edit && <th scope="col" className="border-b border-line py-2.5"><span className="sr-only">Aksi</span></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -153,25 +158,27 @@ export default async function BudgetPage() {
                             />
                             {over && <span className="mt-1 block text-[11px] font-bold text-warn-fg">Lewat {rupiahShort(s - c.allocation)}</span>}
                           </td>
-                          <td className="whitespace-nowrap py-1 text-right">
-                            <FormDialog
-                              variant="icon"
-                              triggerLabel={`Ubah ${c.name}`}
-                              title={`Ubah kategori ${c.name}`}
-                              action={updateCategory.bind(null, c.id)}
-                              trigger={<Pencil size={15} aria-hidden="true" />}
-                            >
-                              <CategoryFields c={c} />
-                            </FormDialog>
-                            <ActionButton
-                              variant="icon"
-                              label={`Hapus ${c.name}`}
-                              confirm={`Hapus kategori ${c.name}? Penawaran di kategori ini ikut terhapus. Pengeluaran tetap tersimpan tanpa kategori.`}
-                              action={deleteCategory.bind(null, c.id)}
-                            >
-                              <Trash2 size={15} aria-hidden="true" />
-                            </ActionButton>
-                          </td>
+                          {edit && (
+                            <td className="whitespace-nowrap py-1 text-right">
+                              <FormDialog
+                                variant="icon"
+                                triggerLabel={`Ubah ${c.name}`}
+                                title={`Ubah kategori ${c.name}`}
+                                action={updateCategory.bind(null, c.id)}
+                                trigger={<Pencil size={15} aria-hidden="true" />}
+                              >
+                                <CategoryFields c={c} />
+                              </FormDialog>
+                              <ActionButton
+                                variant="icon"
+                                label={`Hapus ${c.name}`}
+                                confirm={`Hapus kategori ${c.name}? Penawaran di kategori ini ikut terhapus. Pengeluaran tetap tersimpan tanpa kategori.`}
+                                action={deleteCategory.bind(null, c.id)}
+                              >
+                                <Trash2 size={15} aria-hidden="true" />
+                              </ActionButton>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -188,7 +195,7 @@ export default async function BudgetPage() {
             <SectionTitle id="exp-title">Pengeluaran</SectionTitle>
             {expenses.length === 0 ? (
               <Empty title="Belum ada pengeluaran.">
-                Catat setiap pembayaran beserta foto buktinya, atau tandai termin vendor sebagai lunas.
+                {edit ? "Catat setiap pembayaran beserta foto buktinya, atau tandai termin vendor sebagai lunas." : "Pengeluaran akan muncul di sini setelah dicatat."}
               </Empty>
             ) : (
               <ul className="flex flex-col">
@@ -213,25 +220,27 @@ export default async function BudgetPage() {
                       </a>
                     )}
                     <span className="text-[14px] font-extrabold tabular">{rupiah(e.amount)}</span>
-                    <span className="flex">
-                      <FormDialog
-                        variant="icon"
-                        triggerLabel={`Ubah ${e.description}`}
-                        title="Ubah pengeluaran"
-                        action={updateExpense.bind(null, e.id)}
-                        trigger={<Pencil size={15} aria-hidden="true" />}
-                      >
-                        <ExpenseFields cats={cats} funding={funding} today={today} e={e} receiptName={e.receiptFileId ? fileName.get(e.receiptFileId) : undefined} />
-                      </FormDialog>
-                      <ActionButton
-                        variant="icon"
-                        label={`Hapus ${e.description}`}
-                        confirm={e.paymentTermId ? "Hapus pengeluaran ini? Termin terkait akan kembali berstatus belum dibayar." : "Hapus pengeluaran ini?"}
-                        action={deleteExpense.bind(null, e.id)}
-                      >
-                        <Trash2 size={15} aria-hidden="true" />
-                      </ActionButton>
-                    </span>
+                    {edit && (
+                      <span className="flex">
+                        <FormDialog
+                          variant="icon"
+                          triggerLabel={`Ubah ${e.description}`}
+                          title="Ubah pengeluaran"
+                          action={updateExpense.bind(null, e.id)}
+                          trigger={<Pencil size={15} aria-hidden="true" />}
+                        >
+                          <ExpenseFields cats={cats} funding={funding} today={today} e={e} receiptName={e.receiptFileId ? fileName.get(e.receiptFileId) : undefined} />
+                        </FormDialog>
+                        <ActionButton
+                          variant="icon"
+                          label={`Hapus ${e.description}`}
+                          confirm={e.paymentTermId ? "Hapus pengeluaran ini? Termin terkait akan kembali berstatus belum dibayar." : "Hapus pengeluaran ini?"}
+                          action={deleteExpense.bind(null, e.id)}
+                        >
+                          <Trash2 size={15} aria-hidden="true" />
+                        </ActionButton>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -244,15 +253,17 @@ export default async function BudgetPage() {
             <SectionTitle
               id="dana-title"
               aside={
-                <FormDialog variant="icon" triggerLabel="Tambah sumber dana" title="Tambah sumber dana" action={addFunding} trigger={<Plus size={18} aria-hidden="true" />}>
-                  <FundingFields />
-                </FormDialog>
+                edit && (
+                  <FormDialog variant="icon" triggerLabel="Tambah sumber dana" title="Tambah sumber dana" action={addFunding} trigger={<Plus size={18} aria-hidden="true" />}>
+                    <FundingFields />
+                  </FormDialog>
+                )
               }
             >
               Sumber dana
             </SectionTitle>
             {funding.length === 0 ? (
-              <p className="text-[13px] text-muted">Belum ada sumber dana. Catat tabungan pengantin dan kontribusi tiap keluarga.</p>
+              <p className="text-[13px] text-muted">Belum ada sumber dana.{edit && " Catat tabungan pengantin dan kontribusi tiap keluarga."}</p>
             ) : (
               <>
                 <div className="flex h-3.5 gap-[3px] overflow-hidden rounded-full" aria-hidden="true">
@@ -269,20 +280,22 @@ export default async function BudgetPage() {
                         <span className="block text-[11px] text-muted">{SIDE_LABEL[f.side]}</span>
                       </span>
                       <span className="font-bold">{rupiahShort(f.amount)}</span>
-                      <FormDialog
-                        variant="icon"
-                        triggerLabel={`Ubah ${f.name}`}
-                        title="Ubah sumber dana"
-                        action={updateFunding.bind(null, f.id)}
-                        trigger={<Pencil size={14} aria-hidden="true" />}
-                        footer={
-                          <ActionButton variant="danger" action={deleteFunding.bind(null, f.id)} confirm={`Hapus sumber dana ${f.name}?`} className="mr-auto">
-                            Hapus
-                          </ActionButton>
-                        }
-                      >
-                        <FundingFields f={f} />
-                      </FormDialog>
+                      {edit && (
+                        <FormDialog
+                          variant="icon"
+                          triggerLabel={`Ubah ${f.name}`}
+                          title="Ubah sumber dana"
+                          action={updateFunding.bind(null, f.id)}
+                          trigger={<Pencil size={14} aria-hidden="true" />}
+                          footer={
+                            <ActionButton variant="danger" action={deleteFunding.bind(null, f.id)} confirm={`Hapus sumber dana ${f.name}?`} className="mr-auto">
+                              Hapus
+                            </ActionButton>
+                          }
+                        >
+                          <FundingFields f={f} />
+                        </FormDialog>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -313,21 +326,23 @@ export default async function BudgetPage() {
                         {relativeDays(term.dueDate, today)}
                       </Status>
                     </div>
-                    <FormDialog
-                      variant="ground"
-                      size="sm"
-                      title={`Tandai lunas: ${term.label} ${vendor.name}`}
-                      description={`${rupiah(term.amount)}, jatuh tempo ${dateShorter(term.dueDate)}. Pembayaran dicatat sebagai pengeluaran.`}
-                      action={payTerm.bind(null, term.id)}
-                      submitLabel="Tandai lunas"
-                      trigger="Lunas"
-                    >
-                      <Field label="Tanggal bayar">
-                        <DateField name="date" defaultValue={today} />
-                      </Field>
-                      <FundingSelect funding={funding} />
-                      <FileInput name="receiptFileId" kind="receipt" label="Bukti bayar (opsional)" />
-                    </FormDialog>
+                    {edit && (
+                      <FormDialog
+                        variant="ground"
+                        size="sm"
+                        title={`Tandai lunas: ${term.label} ${vendor.name}`}
+                        description={`${rupiah(term.amount)}, jatuh tempo ${dateShorter(term.dueDate)}. Pembayaran dicatat sebagai pengeluaran.`}
+                        action={payTerm.bind(null, term.id)}
+                        submitLabel="Tandai lunas"
+                        trigger="Lunas"
+                      >
+                        <Field label="Tanggal bayar">
+                          <DateField name="date" defaultValue={today} />
+                        </Field>
+                        <FundingSelect funding={funding} />
+                        <FileInput name="receiptFileId" kind="receipt" label="Bukti bayar (opsional)" />
+                      </FormDialog>
+                    )}
                   </div>
                 );
               })

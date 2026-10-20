@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   const kind = String(form.get("kind") ?? "");
   const area = FILE_AREA[kind];
   if (!area) return NextResponse.json({ error: "Jenis file tidak dikenal." }, { status: 400 });
-  if (!can(ctx.member.role, area)) return NextResponse.json({ error: "Peranmu tidak boleh mengunggah file ini." }, { status: 403 });
+  if (!can(ctx.perms, area, "edit")) return NextResponse.json({ error: "Peranmu tidak boleh mengunggah file ini." }, { status: 403 });
   if (!(upload instanceof File)) return NextResponse.json({ error: "Pilih file terlebih dulu." }, { status: 400 });
   if (upload.size > MAX_UPLOAD) return NextResponse.json({ error: "Ukuran file maksimal 10 MB." }, { status: 400 });
   if (!ALLOWED_MIME.includes(upload.type))

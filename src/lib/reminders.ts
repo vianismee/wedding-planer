@@ -1,10 +1,12 @@
-import { and, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { sendMail } from "./mailer";
 import { addDays, dateLong, rupiah, todayISO } from "./format";
+import { can, normalize, resolvePerms } from "./roles";
 
 /**
- * Mengirim pengingat email termin vendor H-7 dan H-1 ke anggota berperan Pemilik dan Pasangan.
+ * Mengirim pengingat email termin vendor H-7 dan H-1 ke anggota yang boleh mengubah Budget
+ * (yang bisa menandai lunas). Bawaannya Pemilik dan Pasangan.
  * Idempoten: setiap termin ditandai setelah pengingat terkirim.
  */
 export async function runReminders(today = todayISO()) {
@@ -21,11 +23,16 @@ export async function runReminders(today = todayISO()) {
     const kind = h1 ? (term.remindedH1 ? null : "H-1") : term.remindedH7 ? null : "H-7";
     if (!kind) continue;
 
-    const recipients = await db
-      .select({ email: schema.user.email })
-      .from(schema.member)
-      .innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
-      .where(and(eq(schema.member.weddingId, wedding.id), inArray(schema.member.role, ["pemilik", "pasangan"])));
+    const [members, saved] = await Promise.all([
+      db
+        .select({ email: schema.user.email, role: schema.member.role, perms: schema.member.perms })
+        .from(schema.member)
+        .innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
+        .where(eq(schema.member.weddingId, wedding.id)),
+      db.select().from(schema.weddingRole).where(eq(schema.weddingRole.weddingId, wedding.id)),
+    ]);
+    const roles = saved.map((r) => ({ key: r.key, name: r.name, perms: normalize(r.perms) }));
+    const recipients = members.filter((m) => can(resolvePerms(m.role, m.perms, roles), "budget", "edit"));
     if (recipients.length === 0) continue;
 
     const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";

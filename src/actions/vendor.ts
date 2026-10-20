@@ -1,14 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireAction } from "@/lib/session";
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
 import { addDays, parseRupiah, todayISO } from "@/lib/format";
 import { track } from "@/lib/analytics";
-import { addonsTotal, dpLabel, dpValue, offerTotal } from "@/lib/offer";
+import { addonsTotal, dpLabel, dpValue, effectiveDp, offerTotal } from "@/lib/offer";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Isi tanggal.");
 
@@ -33,31 +33,44 @@ async function ownFile(weddingId: string, id: string | null) {
   if (!f) throw new UserError("Lampiran tidak ditemukan.");
 }
 
-/* ---------- Penawaran ---------- */
+/* ---------- Calon vendor dan paket ---------- */
 
-const offerSchema = z.object({
-  categoryId: z.string().min(1, "Pilih kategori."),
-  vendorName: z.string().min(1, "Isi nama vendor.").max(80),
-  packageName: z.string().max(80).nullable(),
-  price: z.number().int().min(1, "Isi harga paket.").max(100_000_000_000),
-  includeItems: z.array(z.string().min(1).max(200)).max(60, "Maksimal 60 item isi paket."),
-  addons: z
-    .array(
-      z.object({
-        label: z.string().min(1, "Isi nama add-on.").max(120),
-        qty: z.number().int().min(1, "Jumlah add-on minimal 1.").max(100_000),
-        price: z.number().int().min(0).max(10_000_000_000),
-      }),
-    )
-    .max(30, "Maksimal 30 add-on."),
+const addonSchema = z
+  .array(
+    z.object({
+      label: z.string().min(1, "Isi nama add-on.").max(120),
+      qty: z.number().int().min(1, "Jumlah add-on minimal 1.").max(100_000),
+      price: z.number().int().min(0).max(10_000_000_000),
+    }),
+  )
+  .max(30, "Maksimal 30 add-on.");
+
+const dpSchema = {
   dpType: z.enum(["percent", "nominal", "none"]),
   dpPercent: z.number().int().min(0, "Persen DP 0 sampai 100.").max(100, "Persen DP 0 sampai 100."),
   dpAmount: z.number().int().min(0).max(100_000_000_000),
+};
+
+// Info calon vendor: diisi sekali, berlaku untuk semua paketnya.
+const prospectSchema = z.object({
+  categoryId: z.string().min(1, "Pilih kategori."),
+  name: z.string().min(1, "Isi nama vendor.").max(80),
+  contact: z.string().max(80).nullable(),
   availability: z.string().max(120).nullable(),
   available: z.boolean(),
   notes: z.string().max(400).nullable(),
-  contact: z.string().max(80).nullable(),
+  ...dpSchema,
+});
+
+const packageSchema = z.object({
+  packageName: z.string().max(80).nullable(),
+  price: z.number().int().min(1, "Isi harga paket.").max(100_000_000_000),
+  includeItems: z.array(z.string().min(1).max(200)).max(60, "Maksimal 60 item isi paket."),
+  addons: addonSchema,
+  notes: z.string().max(400).nullable(),
   attachmentFileId: z.string().nullable(),
+  dpCustom: z.boolean(),
+  ...dpSchema,
 });
 
 function readAddons(fd: FormData) {
@@ -70,10 +83,27 @@ function readAddons(fd: FormData) {
     .filter((a) => a.label || a.price);
 }
 
-const parseOffer = (fd: FormData) =>
-  offerSchema.parse({
+const readDp = (fd: FormData) => ({
+  dpType: str(fd, "dpType") || "percent",
+  dpPercent: Number(str(fd, "dpPercent") || 0),
+  dpAmount: parseRupiah(str(fd, "dpAmount")),
+});
+
+const parseProspect = (fd: FormData) =>
+  prospectSchema.parse({
     categoryId: str(fd, "categoryId"),
-    vendorName: str(fd, "vendorName"),
+    name: str(fd, "vendorName"),
+    contact: optStr(fd, "contact"),
+    availability: optStr(fd, "availability"),
+    available: str(fd, "available") !== "belum",
+    notes: optStr(fd, "vendorNotes"),
+    ...readDp(fd),
+  });
+
+/** Paket dari formulir. Formulir calon vendor baru tidak punya DP paket: paket pertama memakai DP vendor. */
+function parsePackage(fd: FormData, withDp: boolean) {
+  const custom = withDp && str(fd, "dpCustom") === "1";
+  return packageSchema.parse({
     packageName: optStr(fd, "packageName"),
     price: parseRupiah(str(fd, "price")),
     includeItems: fd
@@ -81,128 +111,188 @@ const parseOffer = (fd: FormData) =>
       .map((v) => String(v).trim())
       .filter(Boolean),
     addons: readAddons(fd),
-    dpType: str(fd, "dpType") || "percent",
-    dpPercent: Number(str(fd, "dpPercent") || 0),
-    dpAmount: parseRupiah(str(fd, "dpAmount")),
-    availability: optStr(fd, "availability"),
-    available: str(fd, "available") !== "belum",
     notes: optStr(fd, "notes"),
-    contact: optStr(fd, "contact"),
     attachmentFileId: optStr(fd, "attachmentFileId"),
+    dpCustom: custom,
+    ...(custom ? readDp(fd) : { dpType: "percent", dpPercent: 30, dpAmount: 0 }),
   });
+}
 
-export async function addOffer(fd: FormData): Promise<ActionResult> {
+async function ownProspect(weddingId: string, id: string) {
+  const [p] = await db.select().from(schema.prospect).where(and(eq(schema.prospect.id, id), eq(schema.prospect.weddingId, weddingId)));
+  if (!p) throw new UserError("Calon vendor tidak ditemukan.");
+  return p;
+}
+
+async function ownPackage(weddingId: string, id: string) {
+  const [row] = await db
+    .select({ pkg: schema.offer, prospect: schema.prospect })
+    .from(schema.offer)
+    .innerJoin(schema.prospect, eq(schema.offer.prospectId, schema.prospect.id))
+    .where(and(eq(schema.offer.id, id), eq(schema.offer.weddingId, weddingId)));
+  if (!row) throw new UserError("Paket tidak ditemukan.");
+  return row;
+}
+
+/** Calon vendor baru beserta paket pertamanya. */
+export async function addProspect(fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("vendor");
-    const data = parseOffer(fd);
-    await ownCategory(ctx.wedding.id, data.categoryId);
-    await ownFile(ctx.wedding.id, data.attachmentFileId);
-    await db.insert(schema.offer).values({ ...data, weddingId: ctx.wedding.id });
+    const p = parseProspect(fd);
+    const pkg = parsePackage(fd, false);
+    await ownCategory(ctx.wedding.id, p.categoryId);
+    await ownFile(ctx.wedding.id, pkg.attachmentFileId);
+    await db.transaction(async (tx) => {
+      const id = crypto.randomUUID();
+      await tx.insert(schema.prospect).values({ ...p, id, weddingId: ctx.wedding.id });
+      await tx.insert(schema.offer).values({ ...pkg, prospectId: id, weddingId: ctx.wedding.id });
+    });
     done();
   });
 }
 
-export async function updateOffer(id: string, fd: FormData): Promise<ActionResult> {
+/** Info calon vendor. Pindah kategori membawa semua paketnya. */
+export async function updateProspect(id: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("vendor");
-    const data = parseOffer(fd);
-    await ownCategory(ctx.wedding.id, data.categoryId);
-    await ownFile(ctx.wedding.id, data.attachmentFileId);
-    await db
-      .update(schema.offer)
-      .set(data)
-      .where(and(eq(schema.offer.id, id), eq(schema.offer.weddingId, ctx.wedding.id)));
+    await ownProspect(ctx.wedding.id, id);
+    const p = parseProspect(fd);
+    await ownCategory(ctx.wedding.id, p.categoryId);
+    await db.update(schema.prospect).set(p).where(eq(schema.prospect.id, id));
     done();
   });
 }
 
-export async function deleteOffer(id: string): Promise<ActionResult> {
+/** Hapus calon vendor dan semua paketnya. Vendor yang sudah dipesan dari paketnya tetap ada. */
+export async function deleteProspect(id: string): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("vendor");
-    await db.delete(schema.offer).where(and(eq(schema.offer.id, id), eq(schema.offer.weddingId, ctx.wedding.id)));
+    await db.delete(schema.prospect).where(and(eq(schema.prospect.id, id), eq(schema.prospect.weddingId, ctx.wedding.id)));
+    done();
+  });
+}
+
+export async function addPackage(prospectId: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("vendor");
+    await ownProspect(ctx.wedding.id, prospectId);
+    const pkg = parsePackage(fd, true);
+    await ownFile(ctx.wedding.id, pkg.attachmentFileId);
+    await db.insert(schema.offer).values({ ...pkg, prospectId, weddingId: ctx.wedding.id });
+    done();
+  });
+}
+
+export async function updatePackage(id: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("vendor");
+    await ownPackage(ctx.wedding.id, id);
+    const pkg = parsePackage(fd, true);
+    await ownFile(ctx.wedding.id, pkg.attachmentFileId);
+    await db.update(schema.offer).set(pkg).where(eq(schema.offer.id, id));
+    done();
+  });
+}
+
+/** Salin paket, misalnya untuk membuat Gold dari Silver lalu mengubah bedanya saja. */
+export async function duplicatePackage(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("vendor");
+    const { pkg } = await ownPackage(ctx.wedding.id, id);
+    await db.insert(schema.offer).values({
+      ...pkg,
+      id: crypto.randomUUID(),
+      packageName: `${pkg.packageName || "Paket"} (salinan)`.slice(0, 80),
+      status: "dibandingkan",
+      createdAt: new Date(),
+    });
+    done();
+    return "Paket disalin. Ubah nama dan isinya lewat tombol Ubah di kolom paket itu.";
+  });
+}
+
+/** Hapus satu paket. Paket terakhir menghapus calon vendornya juga, supaya tidak ada vendor tanpa paket. */
+export async function deletePackage(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("vendor");
+    const { pkg, prospect } = await ownPackage(ctx.wedding.id, id);
+    const siblings = await db.select({ id: schema.offer.id }).from(schema.offer).where(eq(schema.offer.prospectId, prospect.id));
+    if (siblings.length <= 1) await db.delete(schema.prospect).where(eq(schema.prospect.id, prospect.id));
+    else await db.delete(schema.offer).where(eq(schema.offer.id, pkg.id));
     done();
   });
 }
 
 export async function trackCompare(categoryId: string) {
-  const ctx = await requireAction("vendor");
+  const ctx = await requireAction("vendor", "view");
   track("offer_compared", { weddingId: ctx.wedding.id, role: ctx.member.role });
   void categoryId;
 }
 
 /**
- * Memilih penawaran: penawaran menjadi vendor terpesan, lalu termin DP
- * (dan pelunasan sisa bila ada) dibuat di Budget.
+ * Memilih paket: paket menjadi vendor terpesan (nama dan kontak dari calon vendornya), lalu termin
+ * DP (dan pelunasan sisa bila ada) dibuat di Budget. DP memakai DP paket bila diatur sendiri.
  */
 export async function chooseOffer(offerId: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("vendor");
-    const [o] = await db
-      .select()
-      .from(schema.offer)
-      .where(and(eq(schema.offer.id, offerId), eq(schema.offer.weddingId, ctx.wedding.id)));
-    if (!o) throw new UserError("Penawaran tidak ditemukan.");
-    if (o.status === "dipilih") throw new UserError("Penawaran ini sudah dipilih.");
+    const { pkg: o, prospect: p } = await ownPackage(ctx.wedding.id, offerId);
+    if (o.status === "dipilih") throw new UserError("Paket ini sudah dipilih.");
     const dpDue = isoDate.parse(str(fd, "dpDue") || addDays(todayISO(), 7));
     const settleDue = isoDate.parse(str(fd, "settleDue") || addDays(ctx.wedding.akadDate, -14));
     // DP dan pelunasan dihitung dari total paket + add-on.
+    const dpInput = effectiveDp(o, p);
     const total = offerTotal(o);
-    const dp = dpValue(o);
+    const dp = dpValue(dpInput);
     const rest = total - dp;
 
-    let vendorName = o.vendorName;
     await db.transaction(async (tx) => {
-      // Satu kategori satu penawaran terpilih: kembalikan pilihan lain ke status dibandingkan.
+      // Satu kategori satu paket terpilih: kembalikan pilihan lain di kategori ini ke status dibandingkan.
+      const sameCategory = tx.select({ id: schema.prospect.id }).from(schema.prospect).where(eq(schema.prospect.categoryId, p.categoryId));
       await tx
         .update(schema.offer)
         .set({ status: "dibandingkan" })
-        .where(and(eq(schema.offer.categoryId, o.categoryId), ne(schema.offer.id, o.id)));
+        .where(and(inArray(schema.offer.prospectId, sameCategory), ne(schema.offer.id, o.id)));
       await tx.update(schema.offer).set({ status: "dipilih" }).where(eq(schema.offer.id, o.id));
       const vendorId = crypto.randomUUID();
       await tx.insert(schema.vendor).values({
         id: vendorId,
         weddingId: ctx.wedding.id,
-        categoryId: o.categoryId,
+        categoryId: p.categoryId,
         offerId: o.id,
-        name: o.vendorName,
+        name: p.name,
         packageName: o.packageName,
         packagePrice: o.price,
         includeItems: o.includeItems,
         addons: o.addons,
-        packageDesc: o.notes,
-        contact: o.contact,
+        packageDesc: [o.notes, p.notes].filter(Boolean).join("\n") || null,
+        contact: p.contact,
         totalPrice: total,
       });
       const terms = [];
-      if (dp > 0) terms.push({ label: dpLabel(o), amount: dp, dueDate: dpDue });
+      if (dp > 0) terms.push({ label: dpLabel(dpInput), amount: dp, dueDate: dpDue });
       if (rest > 0) terms.push({ label: "Pelunasan", amount: rest, dueDate: settleDue });
-      if (terms.length)
-        await tx.insert(schema.paymentTerm).values(terms.map((t) => ({ ...t, vendorId, weddingId: ctx.wedding.id })));
-      vendorName = o.vendorName;
+      if (terms.length) await tx.insert(schema.paymentTerm).values(terms.map((t) => ({ ...t, vendorId, weddingId: ctx.wedding.id })));
     });
     track("offer_chosen", { weddingId: ctx.wedding.id, role: ctx.member.role });
     done();
-    return `${vendorName} tersimpan sebagai vendor. Termin DP sudah dijadwalkan di Budget.`;
+    return `${p.name}${o.packageName ? `, ${o.packageName},` : ""} tersimpan sebagai vendor. Termin DP sudah dijadwalkan di Budget.`;
   });
 }
 
 /**
- * Membatalkan pilihan: penawaran tetap ada di perbandingan, tetapi vendor terpesan dan
- * termin DP/pelunasannya dihapus. Pengeluaran yang sudah dibayar tetap tercatat di Budget.
+ * Membatalkan pilihan: paket tetap ada di perbandingan, tetapi vendor terpesan dan termin
+ * DP/pelunasannya dihapus. Pengeluaran yang sudah dibayar tetap tercatat di Budget.
  */
 export async function cancelOffer(offerId: string): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("vendor");
-    const [o] = await db
-      .update(schema.offer)
-      .set({ status: "dibandingkan" })
-      .where(and(eq(schema.offer.id, offerId), eq(schema.offer.weddingId, ctx.wedding.id)))
-      .returning();
-    if (!o) throw new UserError("Penawaran tidak ditemukan.");
+    const { pkg, prospect } = await ownPackage(ctx.wedding.id, offerId);
+    await db.update(schema.offer).set({ status: "dibandingkan" }).where(eq(schema.offer.id, pkg.id));
     // Termin ikut terhapus lewat cascade.
-    await db.delete(schema.vendor).where(and(eq(schema.vendor.offerId, o.id), eq(schema.vendor.weddingId, ctx.wedding.id)));
+    await db.delete(schema.vendor).where(and(eq(schema.vendor.offerId, pkg.id), eq(schema.vendor.weddingId, ctx.wedding.id)));
     done();
-    return `Pesanan ${o.vendorName} dibatalkan. Penawarannya kembali ke daftar perbandingan.`;
+    return `Pesanan ${prospect.name} dibatalkan. Paketnya kembali ke daftar perbandingan.`;
   });
 }
 

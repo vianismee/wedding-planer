@@ -214,6 +214,15 @@ export function Empty({ title, children, action }: { title: string; children?: R
 }
 
 /** Catatan sistem: Alert shadcn varian note. */
+/** Penanda halaman yang hanya boleh dilihat anggota ini. Tombol ubah di halaman itu tidak ditampilkan. */
+export function ViewOnly({ what }: { what: string }) {
+  return (
+    <p role="note" className="rounded-[14px] bg-sunken px-4 py-3 text-[13px] text-muted">
+      <strong className="font-bold text-ink">Hanya lihat.</strong> Kamu bisa melihat {what}, tapi tidak mengubahnya. Minta pemilik atau pasangan bila perlu akses ubah.
+    </p>
+  );
+}
+
 export function Note({ title, children, className }: { title?: string; children: ReactNode; className?: string }) {
   return (
     <Alert variant="note" role="note" className={cx("rounded-[18px] p-4", className)}>

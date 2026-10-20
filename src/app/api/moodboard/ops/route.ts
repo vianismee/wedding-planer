@@ -6,7 +6,7 @@ import { getContext } from "@/lib/session";
 import { can } from "@/lib/roles";
 import { deleteObject } from "@/lib/storage";
 import { emitMood } from "@/lib/mood-live";
-import { applyOps, EMPTY_BOARD, MOOD_BOARDS, type MoodOp } from "@/lib/moodboard";
+import { applyOps, cleanParents, EMPTY_BOARD, MOOD_BOARDS, type MoodOp } from "@/lib/moodboard";
 import { boardId, dataSchema, opSchema } from "@/lib/moodboard-schema";
 
 // Pesan batas papan ditulis dalam bahasa Indonesia di skema; pesan bawaan zod (bahasa Inggris) diganti umum.
@@ -15,16 +15,17 @@ const issue = (e: z.ZodError) => {
   return !m || m.startsWith("Invalid") || m.startsWith("Too ") ? "Perubahan tidak valid. Muat ulang halaman lalu coba lagi." : m;
 };
 
-async function auth() {
+async function auth(need: "view" | "edit") {
   const ctx = await getContext();
   if (!ctx) return { error: new NextResponse("Perlu masuk", { status: 401 }) };
-  if (!can(ctx.member.role, "moodboard")) return { error: new NextResponse("Tidak diizinkan", { status: 403 }) };
+  if (!can(ctx.perms, "moodboard", need))
+    return { error: NextResponse.json({ error: "Kamu hanya bisa melihat moodboard, perubahan tidak disimpan." }, { status: 403 }) };
   return { ctx };
 }
 
 /** Isi semua papan beserta revisinya, untuk sinkron ulang setelah koneksi putus. */
 export async function GET() {
-  const { ctx, error } = await auth();
+  const { ctx, error } = await auth("view");
   if (!ctx) return error;
   const rows = await db.select().from(schema.moodboard).where(eq(schema.moodboard.weddingId, ctx.wedding.id));
   const boards = Object.fromEntries(
@@ -47,7 +48,7 @@ const body = z.object({
  * beberapa anggota diterapkan berurutan, lalu dikirim ke semua tab lewat /api/moodboard/live.
  */
 export async function POST(req: Request) {
-  const { ctx, error } = await auth();
+  const { ctx, error } = await auth("edit");
   if (!ctx) return error;
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: issue(parsed.error) }, { status: 400 });
@@ -65,6 +66,8 @@ export async function POST(req: Request) {
       // Sambungan ke kartu yang sudah dihapus anggota lain dibuang.
       const ids = new Set(next.nodes.map((n) => n.id));
       next.edges = next.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+      // Frame yang sudah dihapus anggota lain: isinya kembali langsung ke kanvas.
+      next.nodes = cleanParents(next.nodes);
       rev = cur.rev + 1;
       await tx.update(schema.moodboard).set({ data: next, rev, updatedBy: ctx.user.id, updatedAt: new Date() }).where(where);
     });

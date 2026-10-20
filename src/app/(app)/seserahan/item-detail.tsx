@@ -17,7 +17,7 @@ const STATUS: Record<string, { label: string; tone: "warn" | "info" | "ok" }> = 
 };
 
 /** Nama item yang bisa diklik untuk membuka detail, lengkap dengan link pembelian. */
-export function ItemDetail({ it, categories }: { it: SeserahanItem; categories: string[] }) {
+export function ItemDetail({ it, categories, canEdit }: { it: SeserahanItem; categories: string[]; canEdit: boolean }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const close = () => {
@@ -99,26 +99,28 @@ export function ItemDetail({ it, categories }: { it: SeserahanItem; categories: 
                 Buka link pembelian
               </a>
             ) : (
-              <p className="text-[13px] text-muted">Belum ada link pembelian. Tambahkan lewat tombol Ubah.</p>
+              <p className="text-[13px] text-muted">Belum ada link pembelian.{canEdit && " Tambahkan lewat tombol Ubah."}</p>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4">
-              <ActionButton
-                variant="danger"
-                confirm={`Hapus ${it.name}?`}
-                action={async () => {
-                  const r = await deleteItem(it.id);
-                  if (r.ok) close();
-                  return r;
-                }}
-              >
-                <Trash2 size={14} aria-hidden="true" />
-                Hapus
-              </ActionButton>
-              <Button variant="ground" onClick={() => setEditing(true)}>
-                <Pencil size={14} aria-hidden="true" />
-                Ubah
-              </Button>
-            </div>
+            {canEdit && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4">
+                <ActionButton
+                  variant="danger"
+                  confirm={`Hapus ${it.name}?`}
+                  action={async () => {
+                    const r = await deleteItem(it.id);
+                    if (r.ok) close();
+                    return r;
+                  }}
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Hapus
+                </ActionButton>
+                <Button variant="ground" onClick={() => setEditing(true)}>
+                  <Pencil size={14} aria-hidden="true" />
+                  Ubah
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </Modal>

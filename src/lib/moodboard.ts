@@ -62,6 +62,49 @@ export function presenceColor(userId: string) {
   return PRESENCE_COLORS[h % PRESENCE_COLORS.length];
 }
 
+/* ---------- Frame ---------- */
+
+// Ukuran siap pakai untuk frame. Ukuran cetak memakai 150 dpi supaya tetap tajam saat diunduh.
+export const FRAME_PRESETS = [
+  { id: "ig-post", name: "Post Instagram", w: 1080, h: 1080 },
+  { id: "ig-portrait", name: "Post Instagram potret", w: 1080, h: 1350 },
+  { id: "story", name: "Story dan Reels", w: 1080, h: 1920 },
+  { id: "a5", name: "Undangan A5", w: 874, h: 1240 },
+  { id: "4r", name: "Foto 4R", w: 602, h: 898 },
+  { id: "a4", name: "Kertas A4", w: 1240, h: 1754 },
+  { id: "slide", name: "Presentasi 16:9", w: 1920, h: 1080 },
+] as const;
+
+/**
+ * Buang `parent` yang tidak valid: frame-nya sudah tidak ada, bukan frame, atau membentuk putaran
+ * (frame A di dalam B di dalam A, bisa terjadi bila dua anggota memindahkan frame bersamaan).
+ */
+export function cleanParents<T extends Pick<MoodNode, "id" | "type" | "parent">>(nodes: T[]): T[] {
+  const frames = new Map(nodes.filter((n) => n.type === "frame").map((n) => [n.id, n]));
+  const bad = new Set<string>();
+  for (const n of nodes) {
+    if (!n.parent) continue;
+    let p: string | undefined = n.parent;
+    const seen = new Set([n.id]);
+    while (p) {
+      const f = frames.get(p);
+      if (!f || seen.has(p)) {
+        bad.add(n.id);
+        break;
+      }
+      seen.add(p);
+      p = f.parent;
+    }
+  }
+  if (!bad.size) return nodes;
+  return nodes.map((n) => {
+    if (!bad.has(n.id)) return n;
+    const next = { ...n };
+    delete next.parent;
+    return next;
+  });
+}
+
 /* ---------- Operasi ---------- */
 
 export type MoodColl = "nodes" | "edges" | "groups";

@@ -3,10 +3,11 @@ import { asc, eq } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
+import { can } from "@/lib/roles";
 import { addDays, dateShort, relativeDays, rupiahShort, todayISO, diffDays } from "@/lib/format";
 import { addVendor } from "@/actions/vendor";
 import { FormDialog } from "@/components/forms";
-import { Card, Empty, PageHeader, SectionTitle, Status } from "@/components/kit";
+import { Card, Empty, PageHeader, SectionTitle, Status, ViewOnly } from "@/components/kit";
 import { OfferCompare } from "./offer-compare";
 import { VendorFields } from "./offer-fields";
 import { VendorDetail } from "./vendor-detail";
@@ -15,12 +16,17 @@ export const metadata: Metadata = { title: "Vendor" };
 
 export default async function VendorPage({ searchParams }: { searchParams: Promise<{ k?: string }> }) {
   const ctx = await requirePage("vendor");
+  const edit = can(ctx.perms, "vendor", "edit");
+  // Alokasi budget hanya untuk yang boleh melihat Budget; termin pembayaran diubah lewat izin Budget.
+  const seeBudget = can(ctx.perms, "budget");
+  const editTerms = edit && can(ctx.perms, "budget", "edit");
   const wid = ctx.wedding.id;
   const today = todayISO();
   const { k } = await searchParams;
 
-  const [cats, offers, vendors, terms, files] = await Promise.all([
+  const [cats, prospects, offers, vendors, terms, files] = await Promise.all([
     db.select().from(schema.budgetCategory).where(eq(schema.budgetCategory.weddingId, wid)).orderBy(asc(schema.budgetCategory.sortOrder)),
+    db.select().from(schema.prospect).where(eq(schema.prospect.weddingId, wid)).orderBy(asc(schema.prospect.createdAt)),
     db.select().from(schema.offer).where(eq(schema.offer.weddingId, wid)).orderBy(asc(schema.offer.createdAt)),
     db.select().from(schema.vendor).where(eq(schema.vendor.weddingId, wid)),
     db.select().from(schema.paymentTerm).where(eq(schema.paymentTerm.weddingId, wid)).orderBy(asc(schema.paymentTerm.dueDate)),
@@ -50,10 +56,13 @@ export default async function VendorPage({ searchParams }: { searchParams: Promi
         title="Vendor"
         description="Bandingkan penawaran untuk kategori yang belum punya vendor, lalu pantau pembayaran vendor yang sudah dipesan."
       />
+      {!edit && <ViewOnly what="vendor dan penawaran" />}
 
       <OfferCompare
-        cats={cats.map((c) => ({ id: c.id, name: c.name, allocation: c.allocation, need: c.need }))}
-        offers={offers}
+        cats={cats.map((c) => ({ id: c.id, name: c.name, allocation: seeBudget ? c.allocation : 0, need: c.need }))}
+        canEdit={edit}
+        seeBudget={seeBudget}
+        groups={prospects.map((vendor) => ({ vendor, packages: offers.filter((o) => o.prospectId === vendor.id) })).filter((g) => g.packages.length)}
         bookedCats={vendors.map((v) => v.categoryId).filter((x): x is string => Boolean(x))}
         initialCat={k}
         fileNames={fileName}
@@ -70,27 +79,29 @@ export default async function VendorPage({ searchParams }: { searchParams: Promi
             <p className="text-[13px] text-muted">
               Sisa yang harus dibayar <strong className="text-[16px] text-ink">{rupiahShort(totalRest)}</strong>
             </p>
-            <FormDialog
-              variant="ground"
-              wide
-              title="Tambah vendor yang sudah dipesan"
-              description="Untuk vendor yang dipesan tanpa perbandingan penawaran."
-              action={addVendor}
-              trigger={
-                <>
-                  <Plus size={16} aria-hidden="true" />
-                  Vendor
-                </>
-              }
-            >
-              <VendorFields cats={catOpts} />
-            </FormDialog>
+            {edit && (
+              <FormDialog
+                variant="ground"
+                wide
+                title="Tambah vendor yang sudah dipesan"
+                description="Untuk vendor yang dipesan tanpa perbandingan penawaran."
+                action={addVendor}
+                trigger={
+                  <>
+                    <Plus size={16} aria-hidden="true" />
+                    Vendor
+                  </>
+                }
+              >
+                <VendorFields cats={catOpts} />
+              </FormDialog>
+            )}
           </div>
         </div>
 
         {booked.length === 0 ? (
           <Empty title="Belum ada vendor yang dipesan.">
-            Pilih penawaran di atas untuk memesan vendor. Termin DP otomatis dijadwalkan di Budget.
+            {edit ? "Pilih penawaran di atas untuk memesan vendor. Termin DP otomatis dijadwalkan di Budget." : "Vendor yang sudah dipesan akan muncul di sini."}
           </Empty>
         ) : (
           <div className="relative overflow-x-auto">
@@ -137,6 +148,8 @@ export default async function VendorPage({ searchParams }: { searchParams: Promi
                           rest={rest}
                           unscheduled={unscheduled}
                           baseUrl={baseUrl}
+                          canEdit={edit}
+                          canEditTerms={editTerms}
                         />
                       </td>
                       <td className="px-3 py-3 text-right font-semibold tabular">{rupiahShort(v.totalPrice)}</td>

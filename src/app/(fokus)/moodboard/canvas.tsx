@@ -16,6 +16,8 @@ import {
   ChevronsDown,
   ChevronsUp,
   Copy,
+  Download,
+  Frame as FrameIcon,
   Group,
   Circle,
   Eraser,
@@ -31,6 +33,7 @@ import {
   PenLine,
   Plus,
   Redo2,
+  RotateCw,
   Share2,
   Slash,
   Spline,
@@ -53,6 +56,9 @@ import {
   type MoodMoving,
   type MoodOp,
   type MoodRect,
+  cleanParents,
+  FRAME_PRESETS,
+  MOOD_FILLS,
   presenceColor,
   sourceName,
   toSet,
@@ -64,11 +70,16 @@ import { ColorField } from "@/components/color-field";
 import { CopyLink } from "@/components/copy-link";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  ancestors,
   boxOf,
+  clipPath,
   contentBounds,
   curve,
   DEFAULT_SIZE,
+  drawOrder,
   EdgeLabel,
+  FrameBody,
+  frameClip,
   insideRect,
   isCard,
   isStroke,
@@ -92,7 +103,7 @@ import { Cursors, firstName, PeerAvatars, PeerSelections } from "./presence";
 import { DangerButton, GeometryFields, Help, IconAction, PanelHead, PhotoAdjust, Section, StrokePanel, TextField, TextPanel, ToolOptions, type InkStyle } from "./panels";
 import { groupOwners, LayersPanel } from "./layers";
 
-type Tool = "select" | "hand" | "link" | "pen" | "eraser" | "shape" | "text";
+type Tool = "select" | "hand" | "link" | "pen" | "eraser" | "shape" | "text" | "frame";
 type ShapeKind = "rect" | "ellipse" | "line" | "arrow";
 type Sel = { kind: "node" | "edge" | "group"; ids: string[] } | null;
 type Corner = "nw" | "ne" | "sw" | "se";
@@ -105,12 +116,14 @@ type Drag =
   | { kind: "marquee"; x0: number; y0: number; base: string[] }
   | { kind: "pen"; pts: number[] }
   | { kind: "eraser" }
-  | { kind: "shape"; x0: number; y0: number };
+  | { kind: "shape"; x0: number; y0: number }
+  | { kind: "frame"; x0: number; y0: number };
 type Draft =
   | { kind: "link"; from: string; x: number; y: number }
   | { kind: "marquee"; r: MoodRect }
   | { kind: "pen"; pts: number[] }
   | { kind: "shape"; r: MoodRect; line: number[] }
+  | { kind: "frame"; r: MoodRect }
   | null;
 // Foto yang sedang diunggah. Foto baru belum masuk papan (belum ada fileId), jadi tampil sebagai kartu sementara.
 type Upload = { board: string; node: MoodNode; url: string };
@@ -132,10 +145,11 @@ const MIN_SIZE: Record<string, { w: number; h: number }> = {
   shape: { w: 8, h: 8 },
   draw: { w: 8, h: 8 },
   media: { w: 140, h: 140 },
+  frame: { w: 40, h: 40 },
   group: { w: 240, h: 140 },
 };
-const TYPE_LABEL: Record<string, string> = { photo: "Foto", note: "Catatan", palette: "Palet", text: "Teks", shape: "Bentuk", draw: "Gambar", media: "Link" };
-const PANEL_LABEL: Record<string, string> = { photo: "Foto referensi", note: "Catatan", palette: "Palet warna", text: "Teks", shape: "Bentuk", draw: "Gambar pena", media: "Dari link" };
+const TYPE_LABEL: Record<string, string> = { photo: "Foto", note: "Catatan", palette: "Palet", text: "Teks", shape: "Bentuk", draw: "Gambar", media: "Link", frame: "Frame" };
+const PANEL_LABEL: Record<string, string> = { photo: "Foto referensi", note: "Catatan", palette: "Palet warna", text: "Teks", shape: "Bentuk", draw: "Gambar pena", media: "Dari link", frame: "Frame" };
 // Kartu media baru: lebar bawaan, dan tinggi foto paling besar supaya foto yang sangat tinggi tidak memenuhi layar.
 const MEDIA_W = { portrait: 260, landscape: 320 };
 const MEDIA_MAX_H = 520;
@@ -149,6 +163,11 @@ const SHAPES: { k: ShapeKind; name: string; icon: React.ReactNode }[] = [
 const SAVE_TEXT = { saved: "Tersimpan", saving: "Menyimpan…", error: "Ada yang gagal disimpan", offline: "Offline, mencoba lagi…" };
 
 const uid = () => crypto.randomUUID();
+/** Kotak `b` seluruhnya di dalam kotak `o`. */
+// Frame kecil diekspor dua kali lebih rapat supaya tetap tajam; ukuran siap pakai sudah dalam piksel tujuan.
+const exportScale = (r: MoodRect) => (Math.max(r.w, r.h) >= 1000 ? 1 : 2);
+const exportSize = (r: MoodRect) => `${r.w * exportScale(r)} × ${r.h * exportScale(r)}`;
+const within = (b: MoodRect, o: MoodRect) => b.x >= o.x && b.y >= o.y && b.x + b.w <= o.x + o.w && b.y + b.h <= o.y + o.h;
 
 /** Ukuran asli foto atau video dari server, untuk link yang tidak menyebut ukurannya. */
 function naturalSize(src: string, kind: MoodMedia["kind"]) {
@@ -232,6 +251,7 @@ export function MoodboardCanvas({
   const [imports, setImports] = useState<Record<string, Pending>>({});
   const [linkOpen, setLinkOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [spaceDown, setSpaceDown] = useState(false);
   const [linkTarget, setLinkTarget] = useState("");
@@ -245,6 +265,8 @@ export function MoodboardCanvas({
   const [hist, setHist] = useState({ undo: false, redo: false });
 
   const boardRef = useRef<HTMLDivElement>(null);
+  // Lapisan dunia kanvas (yang digeser dan di-zoom), dipakai untuk mengekspor frame jadi PNG.
+  const worldRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   // Ketukan terakhir pada elemen, untuk mendeteksi klik dua kali (dblclick bawaan hilang karena pointer ditangkap kanvas).
   const lastTap = useRef<{ id: string; t: number; x: number; y: number } | null>(null);
@@ -286,10 +308,32 @@ export function MoodboardCanvas({
   const boardName = MOOD_BOARDS.find((x) => x.id === active)!.name;
   const followed = following ? sync.peers[following] : undefined;
   const owners = groupOwners(b, box);
-  // Yang tersembunyi dari panel Layer tidak digambar di kanvas; yang terkunci tidak bisa dipilih atau digeser di kanvas.
-  const shownNodes = b.nodes.filter((n) => !n.hidden);
+  // Urutan gambar: isi frame tepat setelah frame-nya. Yang tersembunyi dari panel Layer tidak digambar,
+  // yang terkunci tidak bisa dipilih atau digeser di kanvas; keduanya berlaku juga untuk isi frame.
+  const order = drawOrder(b.nodes);
+  const hiddenNode = (n: MoodNode) => !!n.hidden || ancestors(n, byId).some((f) => f.hidden);
+  const lockedNode = (n: MoodNode) => !!n.locked || ancestors(n, byId).some((f) => f.locked);
+  const shownNodes = order.filter((n) => !hiddenNode(n));
   const shownIds = new Set(shownNodes.map((n) => n.id));
-  const pickable = (n: MoodNode) => !n.hidden && !n.locked;
+  const pickable = (n: MoodNode) => !hiddenNode(n) && !lockedNode(n);
+  /** Semua isi frame `id`, termasuk isi frame di dalamnya, dalam urutan gambar. */
+  const descendants = (id: string) => order.filter((n) => ancestors(n, byId).some((f) => f.id === id)).map((n) => n.id);
+  /** Frame terdepan yang memuat titik (x, y), selain yang ada di `skip`. */
+  function frameAt(x: number, y: number, skip: Set<string>) {
+    for (let i = shownNodes.length - 1; i >= 0; i--) {
+      const f = shownNodes[i];
+      if (f.type !== "frame" || skip.has(f.id)) continue;
+      const r = box(f);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return f;
+    }
+    return undefined;
+  }
+  /** Elemen baru masuk ke frame tempat titik tengahnya jatuh, seperti di Figma. */
+  function adopt<T extends MoodNode>(item: T): T {
+    const r = boxOf(item);
+    const f = frameAt(r.x + r.w / 2, r.y + r.h / 2, new Set([item.id]));
+    return f ? { ...item, parent: f.id } : item;
+  }
 
   /* ---------- Menyimpan perubahan ---------- */
 
@@ -341,67 +385,181 @@ export function MoodboardCanvas({
   function removeSelection() {
     if (!sel) return;
     const c = sel.kind === "node" ? "nodes" : sel.kind === "edge" ? "edges" : "groups";
-    commit(sel.ids.map((id) => ({ t: "del", c, id })));
+    // Menghapus frame ikut menghapus isinya, seperti di Figma. Isi dihapus lebih dulu supaya undo mengembalikan semuanya.
+    const ids = sel.kind === "node" ? [...new Set(sel.ids.flatMap((id) => [...descendants(id).reverse(), id]))] : sel.ids;
+    commit(ids.map((id) => ({ t: "del", c, id })));
     setSel(null);
     setEditing(null);
   }
   function duplicateSelection() {
     if (sel?.kind !== "node" || !selNodes.length) return;
-    if (raw.nodes.length + selNodes.length > MOOD_LIMITS.nodes) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.nodes} elemen.`);
-    const copies = selNodes.map((n) => ({ ...(current(n.id) ?? n), id: uid(), x: n.x + 24, y: n.y + 24 }));
+    // Frame diduplikat bersama isinya; isi yang frame-nya ikut terpilih tidak disalin dua kali.
+    const roots = selNodes.filter((n) => !ancestors(n, byId).some((f) => selIds.includes(f.id)));
+    const all = roots.flatMap((n) => [n.id, ...descendants(n.id)]);
+    if (raw.nodes.length + all.length > MOOD_LIMITS.nodes) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.nodes} elemen.`);
+    const ids = new Map(all.map((id) => [id, uid()]));
+    const copies = all.map((id) => {
+      const n = current(id) ?? byId.get(id)!;
+      return { ...n, id: ids.get(id)!, x: n.x + 24, y: n.y + 24, ...(n.parent && ids.has(n.parent) && { parent: ids.get(n.parent) }) };
+    });
     commit(copies.map((item) => ({ t: "put", c: "nodes", item })));
-    setSel({ kind: "node", ids: copies.map((c) => c.id) });
+    setSel({ kind: "node", ids: roots.map((n) => ids.get(n.id)!) });
   }
   /**
    * Pindah lapisan elemen terpilih: paling depan, maju satu, mundur satu, atau paling belakang.
+   * Dihitung di antara saudara (elemen dengan frame yang sama), karena hanya urutan itu yang terlihat.
    * Urutan sesama elemen terpilih tetap; elemen yang sudah di ujung tidak bergerak.
    */
   function restack(dir: "front" | "forward" | "backward" | "back") {
-    const order = boardsRef.current[active].nodes.map((n) => n.id);
+    const nodes = boardsRef.current[active].nodes;
+    const parentOf = new Map(cleanParents(nodes).map((n) => [n.id, n.parent]));
+    const order = nodes.map((n) => n.id);
     const chosen = new Set(selIds);
     const up = dir === "front" || dir === "forward";
     const ids = order.filter((id) => chosen.has(id));
     if (up) ids.reverse();
+    const edges = new Map<string | undefined, number>();
     const ops: MoodOp[] = [];
-    let edge = up ? order.length - 1 : 0;
     for (const id of ids) {
-      const i = order.indexOf(id);
-      let j = dir === "front" || dir === "back" ? edge : i + (up ? 1 : -1);
-      if (dir === "forward" || dir === "backward") {
-        if (j < 0 || j >= order.length || chosen.has(order[j])) continue;
+      const p = parentOf.get(id);
+      const sib = order.filter((x) => parentOf.get(x) === p);
+      const i = sib.indexOf(id);
+      let j: number;
+      if (dir === "front" || dir === "back") {
+        j = edges.get(p) ?? (up ? sib.length - 1 : 0);
+        edges.set(p, j + (up ? -1 : 1));
+      } else {
+        j = i + (up ? 1 : -1);
+        if (j < 0 || j >= sib.length || chosen.has(sib[j])) continue;
       }
-      edge += up ? -1 : 1;
       if (j === i) continue;
-      j = Math.max(0, Math.min(order.length - 1, j));
-      order.splice(i, 1);
-      order.splice(j, 0, id);
-      ops.push({ t: "z", id, to: j });
+      const rest = sib.filter((x) => x !== id);
+      order.splice(order.indexOf(id), 1);
+      const to = j === 0 ? order.indexOf(rest[0]) : order.indexOf(rest[j - 1]) + 1;
+      order.splice(to, 0, id);
+      ops.push({ t: "z", id, to });
     }
     commit(ops);
   }
 
   /** Taruh elemen tepat di atas atau di bawah elemen lain (seret di panel Layer). */
   function reorderLayer(id: string, target: string, above: boolean) {
-    const rest = boardsRef.current[active].nodes.filter((n) => n.id !== id);
-    const i = rest.findIndex((n) => n.id === target);
-    if (i >= 0) commit([{ t: "z", id, to: above ? i + 1 : i }]);
+    const d = boardsRef.current[active];
+    const n = d.nodes.find((x) => x.id === id);
+    const t = d.nodes.find((x) => x.id === target);
+    if (!n || !t) return;
+    const ops: MoodOp[] = [];
+    if ((n.parent ?? null) !== (t.parent ?? null)) {
+      // Pindah frame lewat panel Layer hanya bila elemennya memang berada di dalam frame tujuan,
+      // supaya tidak ada elemen yang tiba-tiba hilang terpotong.
+      const f = t.parent ? byId.get(t.parent) : undefined;
+      if (f && (f.id === id || descendants(id).includes(f.id))) return;
+      const r = box(n);
+      if (f && !within({ x: r.x + r.w / 2, y: r.y + r.h / 2, w: 0, h: 0 }, box(f)))
+        return flash(`Geser elemennya ke dalam ${f.title || "frame"} di kanvas untuk memasukkannya ke frame itu.`);
+      ops.push({ t: "patch", c: "nodes", id, set: { parent: t.parent ?? null } });
+    }
+    const rest = d.nodes.filter((x) => x.id !== id);
+    const i = rest.findIndex((x) => x.id === target);
+    ops.push({ t: "z", id, to: above ? i + 1 : i });
+    commit(ops);
   }
 
-  /** Kelompokkan elemen terpilih: kelompok baru dibuat pas mengelilinginya, dengan ruang untuk nama di atas. */
+  /** Bungkus pilihan dengan frame baru (Ctrl+Alt+G), pas mengelilinginya dengan sedikit ruang. */
+  function frameSelection() {
+    if (sel?.kind !== "node" || !selNodes.length) return flash("Pilih elemen yang mau dimasukkan ke frame dulu.");
+    if (raw.nodes.length >= MOOD_LIMITS.nodes) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.nodes} elemen.`);
+    const roots = selNodes.filter((n) => !ancestors(n, byId).some((f) => selIds.includes(f.id)));
+    const rs = roots.map(box);
+    const x = r1(Math.min(...rs.map((r) => r.x)) - 24);
+    const y = r1(Math.min(...rs.map((r) => r.y)) - 24);
+    const w = r1(Math.max(...rs.map((r) => r.x + r.w)) + 24 - x);
+    const h = r1(Math.max(...rs.map((r) => r.y + r.h)) + 24 - y);
+    const parents = new Set(roots.map((n) => n.parent));
+    const f: MoodNode = { id: uid(), type: "frame", title: "Frame", tags: [], fill: "#ffffff", x, y, w, h, ...(parents.size === 1 && roots[0].parent && { parent: roots[0].parent }) };
+    // Frame ditaruh di lapisan elemen terbawah yang dibungkus, supaya tidak menutupi elemen lain.
+    const lowest = Math.min(...roots.map((n) => boardsRef.current[active].nodes.findIndex((x) => x.id === n.id)));
+    commit([
+      { t: "put", c: "nodes", item: f },
+      { t: "z", id: f.id, to: Math.max(0, lowest) },
+      ...roots.map((n): MoodOp => ({ t: "patch", c: "nodes", id: n.id, set: { parent: f.id } })),
+    ]);
+    setSel({ kind: "node", ids: [f.id] });
+  }
+
+  /** Lepas frame: kotaknya dihapus, isinya tetap di tempat dan pindah ke tempat frame itu berada. */
+  function unframe(ids: string[]) {
+    const d = boardsRef.current[active];
+    const ops: MoodOp[] = [];
+    const kids: string[] = [];
+    for (const id of ids) {
+      const f = d.nodes.find((x) => x.id === id);
+      if (f?.type !== "frame") continue;
+      for (const n of d.nodes)
+        if (n.parent === id) {
+          kids.push(n.id);
+          ops.push({ t: "patch", c: "nodes", id: n.id, set: { parent: f.parent ?? null } });
+        }
+      ops.push({ t: "del", c: "nodes", id });
+    }
+    commit(ops);
+    setSel(kids.length ? { kind: "node", ids: kids } : null);
+  }
+
+  /** Ekspor frame jadi PNG: hanya frame dan isinya, tanpa garis pilihan dan tombol kartu. */
+  async function exportFrame(f: MoodNode) {
+    const world = worldRef.current;
+    if (!world) return;
+    setExporting(true);
+    setSel(null);
+    // Tunggu garis pilihan hilang dari layar sebelum digambar.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const keep = new Set([f.id, ...descendants(f.id)]);
+    const r = box(f);
+    try {
+      const { toPng } = await import("html-to-image");
+      const url = await toPng(world, {
+        width: r.w,
+        height: r.h,
+        pixelRatio: exportScale(r),
+        backgroundColor: f.fill ?? "#ffffff",
+        style: { transform: `translate(${-r.x}px, ${-r.y}px)` },
+        // Diketik HTMLElement, tapi yang lewat juga node SVG dan teks.
+        filter: (node) => {
+          const el = node as Node;
+          if (!(el instanceof HTMLElement || el instanceof SVGElement)) return true;
+          if (el.dataset.ui !== undefined || el.dataset.frameLabel !== undefined) return false;
+          if (el.parentElement === world) return !!el.dataset.id && keep.has(el.dataset.id);
+          return true;
+        },
+      });
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(f.title || "frame").replace(/[\\/:*?"<>|]+/g, "-")}.png`;
+      a.click();
+    } catch {
+      flash("Frame belum bisa diunduh. Coba lagi, atau kecilkan frame-nya.");
+    } finally {
+      setExporting(false);
+      setSel({ kind: "node", ids: [f.id] });
+    }
+  }
+
+  /** Jadikan section (Ctrl+G): section baru dibuat pas mengelilingi elemen terpilih, dengan ruang untuk nama di atas. */
   function groupSelection() {
-    if (sel?.kind !== "node" || !selNodes.length) return flash("Pilih elemen yang mau dikelompokkan dulu.");
-    if (raw.groups.length >= MOOD_LIMITS.groups) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.groups} kelompok.`);
+    if (sel?.kind !== "node" || !selNodes.length) return flash("Pilih elemen yang mau dijadikan section dulu.");
+    if (raw.groups.length >= MOOD_LIMITS.groups) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.groups} section.`);
     const rs = selNodes.map(box);
     const x0 = Math.min(...rs.map((r) => r.x)) - 24;
     const y0 = Math.min(...rs.map((r) => r.y)) - 52;
     const x1 = Math.max(...rs.map((r) => r.x + r.w)) + 24;
     const y1 = Math.max(...rs.map((r) => r.y + r.h)) + 24;
-    const g: MoodGroup = { id: uid(), title: "Kelompok baru", color: "netral", x: r1(x0), y: r1(y0), w: Math.max(MIN_SIZE.group.w, r1(x1 - x0)), h: Math.max(MIN_SIZE.group.h, r1(y1 - y0)) };
+    const g: MoodGroup = { id: uid(), title: "Section baru", color: "netral", x: r1(x0), y: r1(y0), w: Math.max(MIN_SIZE.group.w, r1(x1 - x0)), h: Math.max(MIN_SIZE.group.h, r1(y1 - y0)) };
     commit([{ t: "put", c: "groups", item: g }]);
     setSel({ kind: "group", ids: [g.id] });
   }
 
-  /** Lepas kelompok: kotaknya dihapus, isinya tetap di tempat dan langsung terpilih. */
+  /** Lepas section: kotaknya dihapus, isinya tetap di tempat dan langsung terpilih. */
   function ungroup(ids: string[]) {
     if (!ids.length) return;
     const kids = b.nodes.filter((n) => ids.includes(owners.get(n.id) ?? "")).map((n) => n.id);
@@ -616,15 +774,22 @@ export function MoodboardCanvas({
     const id = uid();
     const d = DEFAULT_SIZE[n.type];
     const pos = at ?? freeSpot(n.w ?? d.w, n.h ?? d.h);
-    commit([{ t: "put", c: "nodes", item: { id, tags: [], ...n, ...pos } }]);
+    commit([{ t: "put", c: "nodes", item: adopt({ id, tags: [], ...n, ...pos } as MoodNode) }]);
     setSel({ kind: "node", ids: [id] });
     return id;
   }
+  /** Frame ukuran siap pakai, ditaruh di tempat kosong lalu ditampilkan utuh. */
+  function addFrame(preset: (typeof FRAME_PRESETS)[number]) {
+    const at = freeSpot(preset.w, preset.h);
+    if (!addNode({ type: "frame", title: preset.name, fill: "#ffffff", w: preset.w, h: preset.h }, at)) return;
+    setTool("select");
+    showRect({ ...at, w: preset.w, h: preset.h });
+  }
   function addGroup() {
-    if (raw.groups.length >= MOOD_LIMITS.groups) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.groups} kelompok.`);
+    if (raw.groups.length >= MOOD_LIMITS.groups) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.groups} section.`);
     const id = uid();
     const c = center(560, 320);
-    commit([{ t: "put", c: "groups", item: { id, title: "Kelompok baru", color: "netral", x: c.x, y: c.y, w: 560, h: 320 } }]);
+    commit([{ t: "put", c: "groups", item: { id, title: "Section baru", color: "netral", x: c.x, y: c.y, w: 560, h: 320 } }]);
     setSel({ kind: "group", ids: [id] });
     setTool("select");
   }
@@ -683,7 +848,7 @@ export function MoodboardCanvas({
       setUploads((u) => ({ ...u, [node.id]: { board: boardId, node, url: URL.createObjectURL(f) } }));
       uploadPhoto(f)
         .then((fileId) => {
-          commit([{ t: "put", c: "nodes", item: { ...node, fileId } }], undefined, boardId);
+          commit([{ t: "put", c: "nodes", item: adopt({ ...node, fileId }) }], undefined, boardId);
           dropUpload(node.id);
         })
         .catch((e: Error) => {
@@ -732,7 +897,7 @@ export function MoodboardCanvas({
       const ratio = first.h! / first.w!;
       const w = Math.max(MIN_SIZE.media.w, Math.round(Math.min(ratio < 1 ? MEDIA_W.landscape : MEDIA_W.portrait, MEDIA_MAX_H / ratio)));
       const item: MoodNode = { id, type: "media", title: data.title ?? "", tags: [], url, media, x: pos.x, y: pos.y, w, h: Math.round(w * ratio) + MEDIA_FOOTER };
-      commit([{ t: "put", c: "nodes", item }], undefined, boardId);
+      commit([{ t: "put", c: "nodes", item: adopt(item) }], undefined, boardId);
       if (boardId === activeRef.current) setSel({ kind: "node", ids: [id] });
     } catch (e) {
       flash(e instanceof Error && e.message !== "Failed to fetch" ? e.message : "Link belum terambil. Periksa koneksi lalu coba lagi.");
@@ -788,6 +953,10 @@ export function MoodboardCanvas({
       startDrag(e, { kind: "eraser" });
       return eraseAt(p.x, p.y);
     }
+    if (tool === "frame") {
+      startDrag(e, { kind: "frame", x0: p.x, y0: p.y });
+      return setDraft({ kind: "frame", r: { x: p.x, y: p.y, w: 0, h: 0 } });
+    }
     if (tool === "shape") {
       startDrag(e, { kind: "shape", x0: p.x, y0: p.y });
       return setDraft({ kind: "shape", r: { x: p.x, y: p.y, w: 0, h: 0 }, line: [p.x, p.y, p.x, p.y] });
@@ -814,9 +983,15 @@ export function MoodboardCanvas({
       const g = b.groups.find((x) => x.id === id);
       if (!g) continue;
       groups[id] = { x: g.x, y: g.y };
-      // Elemen di dalam kelompok ikut berpindah, kecuali yang terkunci.
-      for (const n of b.nodes) if (!n.locked && insideRect(box(n), g)) nodes[n.id] = { x: n.x, y: n.y };
+      // Elemen di dalam section ikut berpindah, kecuali yang terkunci.
+      for (const n of b.nodes) if (!lockedNode(n) && insideRect(box(n), g)) nodes[n.id] = { x: n.x, y: n.y };
     }
+    // Isi frame ikut berpindah bersama frame-nya.
+    for (const id of Object.keys(nodes))
+      for (const k of descendants(id)) {
+        const n = byId.get(k);
+        if (n && !lockedNode(n)) nodes[k] = { x: n.x, y: n.y };
+      }
     startDrag(e, { kind: "move", x0: p.x, y0: p.y, nodes, groups, moved: false });
   }
 
@@ -825,7 +1000,11 @@ export function MoodboardCanvas({
     const viaHandle = (e.target as HTMLElement).dataset?.linkHandle !== undefined;
     if ((e.button !== 0 && e.button !== 1) || drag.current?.kind === "pinch") return;
     // Alat gambar dan geser bekerja di atas elemen juga: biarkan kanvas yang menangani. Elemen terkunci juga.
-    if (n.locked || panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || (tool === "text" && n.type !== "text")) return;
+    if (lockedNode(n) || panning(e) || tool === "pen" || tool === "eraser" || tool === "shape" || tool === "frame" || (tool === "text" && n.type !== "text")) return;
+    // Frame di kanvas (bukan di dalam frame lain) dipilih lewat namanya, seperti di Figma, supaya menarik
+    // di latarnya tetap bisa memilih beberapa isinya sekaligus. Setelah terpilih, latarnya bisa diseret.
+    const onLabel = (e.target as HTMLElement).dataset?.frameLabel !== undefined;
+    if (n.type === "frame" && !n.parent && !onLabel && tool === "select" && !(sel?.kind === "node" && sel.ids.includes(n.id))) return;
     e.stopPropagation();
     if (editing === n.id) return;
     boardRef.current?.focus({ preventScroll: true });
@@ -973,8 +1152,11 @@ export function MoodboardCanvas({
     else if (d.kind === "marquee") {
       const r = { x: Math.min(d.x0, p.x), y: Math.min(d.y0, p.y), w: Math.abs(p.x - d.x0), h: Math.abs(p.y - d.y0) };
       setDraft({ kind: "marquee", r });
-      const hit = b.nodes.filter((n) => pickable(n) && overlaps(r, box(n))).map((n) => n.id);
-      const ids = [...new Set([...d.base, ...hit])];
+      // Frame ikut terpilih hanya bila seluruhnya masuk kotak; isi frame yang frame-nya terpilih tidak dipilih terpisah.
+      const hit = b.nodes.filter((n) => pickable(n) && overlaps(r, box(n)) && (n.type !== "frame" || within(box(n), r)));
+      const hitIds = new Set(hit.map((n) => n.id));
+      const top = hit.filter((n) => !ancestors(n, byId).some((f) => hitIds.has(f.id))).map((n) => n.id);
+      const ids = [...new Set([...d.base, ...top])];
       setSel(ids.length ? { kind: "node", ids } : null);
     } else if (d.kind === "pen") {
       const lx = d.pts[d.pts.length - 2];
@@ -983,6 +1165,7 @@ export function MoodboardCanvas({
       d.pts.push(Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10);
       setDraft({ kind: "pen", pts: [...d.pts] });
     } else if (d.kind === "eraser") eraseAt(p.x, p.y);
+    else if (d.kind === "frame") setDraft({ kind: "frame", r: shapeRect(d.x0, d.y0, p.x, p.y, e.shiftKey) });
     else if (d.kind === "shape") {
       const end = lineEnd(d.x0, d.y0, p.x, p.y, e.shiftKey);
       setDraft({ kind: "shape", r: shapeRect(d.x0, d.y0, p.x, p.y, e.shiftKey), line: [d.x0, d.y0, end.x, end.y] });
@@ -1006,12 +1189,23 @@ export function MoodboardCanvas({
         const g = cur.groups.find((x) => x.id === id);
         if (g && preview[id]) ops.push({ t: "patch", c: "groups", id, set: { x: preview[id].x, y: preview[id].y } });
       }
-      for (const id of Object.keys(d.nodes)) {
+      const movedIds = Object.keys(d.nodes);
+      const moved = new Set(movedIds);
+      for (const id of movedIds) {
         const n = current(id);
-        if (n && preview[id]) ops.push({ t: "patch", c: "nodes", id, set: { x: preview[id].x, y: preview[id].y } });
+        if (!n || !preview[id]) continue;
+        ops.push({ t: "patch", c: "nodes", id, set: { x: preview[id].x, y: preview[id].y } });
+        // Dilepas di atas frame: masuk ke frame itu. Dilepas di luar frame-nya: keluar. Isi frame yang ikut digeser bersama frame-nya tetap.
+        if (n.parent && moved.has(n.parent)) continue;
+        const r = boxOf({ ...n, ...preview[id] }, textH[id]);
+        const f = frameAt(r.x + r.w / 2, r.y + r.h / 2, new Set([id, ...descendants(id)]));
+        if ((f?.id ?? null) !== (n.parent ?? null)) ops.push({ t: "patch", c: "nodes", id, set: { parent: f?.id ?? null } });
       }
-      // Elemen yang digeser dibawa ke depan, kecuali saat yang digeser kelompok (urutan isinya tetap).
-      if (!Object.keys(d.groups).length) for (const id of Object.keys(d.nodes)) ops.push({ t: "front", id });
+      // Elemen yang digeser dibawa ke depan (urutan sesamanya tetap), kecuali saat yang digeser section.
+      if (!Object.keys(d.groups).length) {
+        const idx = new Map(cur.nodes.map((n, i) => [n.id, i]));
+        for (const id of [...movedIds].sort((a, z) => (idx.get(a) ?? 0) - (idx.get(z) ?? 0))) ops.push({ t: "front", id });
+      }
       commit(ops);
     } else if (d.kind === "resize" && preview[d.id]) {
       const r = preview[d.id];
@@ -1019,7 +1213,7 @@ export function MoodboardCanvas({
       else patchNode(d.id, current(d.id)?.type === "text" ? { x: r.x, w: r.w } : { x: r.x, y: r.y, w: r.w, h: r.h });
     } else if (d.kind === "link") {
       const hit = [...b.nodes].reverse().find((n) => {
-        if (isStroke(n) || n.hidden) return false;
+        if (isStroke(n) || n.type === "frame" || hiddenNode(n)) return false;
         const r = box(n);
         return p.x >= r.x - 10 && p.x <= r.x + r.w + 10 && p.y >= r.y - 10 && p.y <= r.y + r.h + 10;
       });
@@ -1029,6 +1223,7 @@ export function MoodboardCanvas({
       commit(erasing.map((id) => ({ t: "del", c: "nodes", id })));
       setErasing([]);
     } else if (d.kind === "shape") finishShape(d.x0, d.y0, p.x, p.y, e.shiftKey);
+    else if (d.kind === "frame") finishFrame(d.x0, d.y0, p.x, p.y, e.shiftKey);
     setPreview({});
     setDraft(null);
     presence({ board: active, moving: null });
@@ -1039,7 +1234,7 @@ export function MoodboardCanvas({
     // Ketukan tanpa gerak jadi titik.
     const line = pts.length === 2 ? [...pts, pts[0] + 0.1, pts[1]] : simplify(pts, 1 / zoom);
     const l = toLocal(line.slice(0, MOOD_LIMITS.points), style.strokeWidth / 2 + 2);
-    commit([{ t: "put", c: "nodes", item: { id: uid(), type: "draw", title: "", tags: [], color: style.color, strokeWidth: style.strokeWidth, ...l } }]);
+    commit([{ t: "put", c: "nodes", item: adopt({ id: uid(), type: "draw", title: "", tags: [], color: style.color, strokeWidth: style.strokeWidth, ...l }) }]);
   }
 
   function finishShape(x0: number, y0: number, x1: number, y1: number, shift: boolean) {
@@ -1056,6 +1251,19 @@ export function MoodboardCanvas({
       item = { type: "shape", shape: shapeKind, title: "", color: style.color, strokeWidth: style.strokeWidth, fill: style.fill, x: r1(r.x), y: r1(r.y), w: Math.max(8, r1(r.w)), h: Math.max(8, r1(r.h)) };
     }
     if (addNode(item, { x: item.x, y: item.y })) setTool("select");
+  }
+
+  /** Frame yang digambar dengan alat Frame. Elemen yang seluruhnya ada di dalamnya langsung jadi isinya. */
+  function finishFrame(x0: number, y0: number, x1: number, y1: number, square: boolean) {
+    if (raw.nodes.length >= MOOD_LIMITS.nodes) return flash(`Papan ini sudah berisi ${MOOD_LIMITS.nodes} elemen.`);
+    const tiny = Math.hypot(x1 - x0, y1 - y0) * zoom < 6;
+    const r = tiny ? { x: x0, y: y0, w: DEFAULT_SIZE.frame.w, h: DEFAULT_SIZE.frame.h } : shapeRect(x0, y0, x1, y1, square);
+    const rect = { x: r1(r.x), y: r1(r.y), w: Math.max(MIN_SIZE.frame.w, r1(r.w)), h: Math.max(MIN_SIZE.frame.h, r1(r.h)) };
+    const item = adopt({ id: uid(), type: "frame", title: "Frame", tags: [], fill: "#ffffff", ...rect } as MoodNode);
+    const inside = boardsRef.current[active].nodes.filter((n) => (n.parent ?? null) === (item.parent ?? null) && within(box(n), rect));
+    commit([{ t: "put", c: "nodes", item }, ...inside.map((n): MoodOp => ({ t: "patch", c: "nodes", id: n.id, set: { parent: item.id } }))]);
+    setSel({ kind: "node", ids: [item.id] });
+    setTool("select");
   }
 
   function onWheel(e: WheelEvent) {
@@ -1092,10 +1300,10 @@ export function MoodboardCanvas({
       e.preventDefault();
       return duplicateSelection();
     }
-    if (mod && (k === "g" || k === "G")) {
+    if (mod && (k === "g" || k === "G" || e.code === "KeyG")) {
       e.preventDefault();
-      if (e.shiftKey) return ungroup(sel?.kind === "group" ? sel.ids : []);
-      return groupSelection();
+      if (e.shiftKey) return sel?.kind === "group" ? ungroup(sel.ids) : unframe(sel?.kind === "node" ? sel.ids : []);
+      return e.altKey ? frameSelection() : groupSelection();
     }
     // Shift mengubah ] dan [ menjadi } dan { di keyboard US.
     if (mod && "[]{}".includes(k) && k.length === 1 && sel?.kind === "node") {
@@ -1139,13 +1347,14 @@ export function MoodboardCanvas({
           for (const n of d.nodes) if (insideRect(box(n), g)) moved.add(n.id);
         } else moved.add(id);
       }
+      for (const id of [...moved]) for (const k of descendants(id)) moved.add(k);
       for (const id of moved) {
         const n = d.nodes.find((x) => x.id === id);
-        if (n && !n.locked) ops.push({ t: "patch", c: "nodes", id, set: { x: n.x + dx, y: n.y + dy } });
+        if (n && !lockedNode(n)) ops.push({ t: "patch", c: "nodes", id, set: { x: n.x + dx, y: n.y + dy } });
       }
       commit(ops, `nudge:${sel.ids.join()}`);
     } else {
-      const tools: Record<string, Tool> = { v: "select", h: "hand", c: "link", p: "pen", e: "eraser", r: "shape", t: "text" };
+      const tools: Record<string, Tool> = { v: "select", h: "hand", c: "link", f: "frame", p: "pen", e: "eraser", r: "shape", t: "text" };
       const next = tools[k.toLowerCase()];
       if (next) setTool(next);
       else if (k === "+" || k === "=") zoomStep(0.1);
@@ -1259,7 +1468,11 @@ export function MoodboardCanvas({
           ? "Klik di kanvas untuk menulis"
           : tool === "shape"
             ? "Seret untuk menggambar. Tahan Shift untuk persegi, lingkaran, atau garis lurus 45°"
-            : null;
+            : tool === "frame"
+              ? "Seret untuk membuat frame, atau klik untuk ukuran bawaan. Ukuran siap pakai ada di tombol Frame"
+              : null;
+  // Elemen terpilih yang sebagian terpotong frame: kotaknya, untuk garis pilihan dan pegangan di luar potongan.
+  const clippedSel = selNode && shownIds.has(selNode.id) && clipPath(box(selNode), frameClip(selNode, byId, box)) ? box(selNode) : null;
   const shareUrl = share[active] && typeof window !== "undefined" ? `${window.location.origin}/m/${share[active]}` : "";
 
   return (
@@ -1377,8 +1590,18 @@ export function MoodboardCanvas({
               <div className="flex gap-0.5">
                 <button
                   type="button"
-                  aria-label="Kelompokkan pilihan (Ctrl+G)"
-                  title="Kelompokkan pilihan (Ctrl+G)"
+                  aria-label="Bungkus pilihan dengan frame (Ctrl+Alt+G)"
+                  title="Bungkus pilihan dengan frame (Ctrl+Alt+G)"
+                  disabled={sel?.kind !== "node"}
+                  onClick={frameSelection}
+                  className="flex size-10 items-center justify-center rounded-lg hover:bg-ground disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
+                >
+                  <FrameIcon size={16} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Jadikan section (Ctrl+G)"
+                  title="Jadikan section (Ctrl+G)"
                   disabled={sel?.kind !== "node"}
                   onClick={groupSelection}
                   className="flex size-10 items-center justify-center rounded-lg hover:bg-ground disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
@@ -1387,10 +1610,10 @@ export function MoodboardCanvas({
                 </button>
                 <button
                   type="button"
-                  aria-label="Lepas kelompok (Ctrl+Shift+G)"
-                  title="Lepas kelompok (Ctrl+Shift+G)"
-                  disabled={sel?.kind !== "group"}
-                  onClick={() => ungroup(sel?.kind === "group" ? sel.ids : [])}
+                  aria-label="Lepas section atau frame (Ctrl+Shift+G)"
+                  title="Lepas section atau frame (Ctrl+Shift+G)"
+                  disabled={!(sel?.kind === "group" || selNodes.some((n) => n.type === "frame"))}
+                  onClick={() => (sel?.kind === "group" ? ungroup(sel.ids) : unframe(selIds))}
                   className="flex size-10 items-center justify-center rounded-lg hover:bg-ground disabled:text-[#8d8c9e] disabled:hover:bg-transparent"
                 >
                   <Ungroup size={16} aria-hidden="true" />
@@ -1412,7 +1635,7 @@ export function MoodboardCanvas({
               />
             </div>
             <p className="border-t border-line px-4 py-3 text-[12px] leading-[1.5] text-muted">
-              Seret untuk mengubah urutan, klik dua kali untuk mengganti nama. Isi kelompok mengikuti posisinya di kanvas.
+              Seret untuk mengubah urutan, klik dua kali untuk mengganti nama. Elemen masuk ke frame saat dilepas di atasnya; isi section mengikuti posisinya.
             </p>
           </aside>
         )}
@@ -1453,7 +1676,7 @@ export function MoodboardCanvas({
             cursor: ownCursor,
           }}
         >
-          <div className="absolute left-0 top-0 size-px origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+          <div ref={worldRef} className="absolute left-0 top-0 size-px origin-top-left" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
             {b.groups.filter((g) => !g.hidden).map((g) => {
               const c = MOOD_GROUP_COLORS[g.color] ?? MOOD_GROUP_COLORS.netral;
               const on = selGroup?.id === g.id;
@@ -1465,7 +1688,7 @@ export function MoodboardCanvas({
                   style={{ left: g.x, top: g.y, width: g.w, height: g.h, background: c.bg, border: on ? "2px solid #1c1b29" : `1.5px solid ${c.line}` }}
                 >
                   <div className="absolute inset-x-4 top-3 flex min-w-0 items-baseline gap-2">
-                    <span className="truncate text-[14px] font-extrabold">{g.title || "Kelompok"}</span>
+                    <span className="truncate text-[14px] font-extrabold">{g.title || "Section"}</span>
                     <span className="whitespace-nowrap text-[11px] font-semibold text-muted">{b.nodes.filter((n) => insideRect(box(n), g)).length} elemen</span>
                   </div>
                   {on && !g.locked && <Handles zoom={zoom} corners={["se"]} onDown={(e, c2) => onResizeDown(e, g.id, "groups", c2)} />}
@@ -1525,9 +1748,13 @@ export function MoodboardCanvas({
               const single = on && selIds.length === 1;
               const card = isCard(n);
               const stroke = isStroke(n);
-              const linkable = !stroke && !n.locked && (tool === "select" || tool === "link");
+              const frame = n.type === "frame";
+              const locked = lockedNode(n);
+              // Bagian yang keluar dari frame tidak digambar. Pegangan elemen yang terpotong digambar terpisah di bawah.
+              const clip = clipPath(r, frameClip(n, byId, box));
+              const linkable = !stroke && !frame && !locked && (tool === "select" || tool === "link");
               const showHandles = single || tool === "link";
-              const resizable = single && !n.locked && n.type !== "palette" && editing !== n.id && tool === "select";
+              const resizable = single && !locked && !clip && n.type !== "palette" && editing !== n.id && tool === "select";
               return (
                 <div
                   key={n.id}
@@ -1537,20 +1764,30 @@ export function MoodboardCanvas({
                   className={cx(
                     "group/node absolute box-border",
                     stroke && "pointer-events-none",
-                    tool === "select" && !stroke && !n.locked && editing !== n.id && "cursor-move",
+                    tool === "select" && !stroke && !locked && editing !== n.id && (!frame || n.parent || on) && "cursor-move",
                     tool === "link" && "cursor-crosshair",
                     card && "rounded-[18px] border-2",
                     card && (n.type === "note" ? "bg-note-bg" : "bg-surface"),
                     card && (on ? "border-ink" : n.type === "note" ? "border-[#ebddba]" : "border-line"),
-                    !card && on && "outline-2 outline-offset-4 outline-ink",
+                    !card && !frame && on && "outline-2 outline-offset-4 outline-ink",
                   )}
-                  style={{ left: n.x, top: n.y, width: r.w, height: n.type === "text" ? undefined : r.h }}
+                  style={{
+                    left: n.x,
+                    top: n.y,
+                    width: r.w,
+                    height: n.type === "text" ? undefined : r.h,
+                    clipPath: clip,
+                    // Garis pilihan frame tetap 2px di layar berapa pun zoom-nya.
+                    outline: frame && on ? `${2 / zoom}px solid #1c1b29` : undefined,
+                  }}
                 >
+                  {frame && <FrameBody n={n} zoom={zoom} />}
                   {linkable &&
                     (["right", "left", "top", "bottom"] as const).map((side) => (
                       <span
                         key={side}
                         aria-hidden="true"
+                        data-ui=""
                         data-link-handle=""
                         className={cx(
                           "absolute z-[2] size-[18px] cursor-crosshair rounded-full border-2 border-ink bg-surface transition-opacity duration-150 hover:bg-ink",
@@ -1662,6 +1899,22 @@ export function MoodboardCanvas({
                 )}
               </svg>
             )}
+            {/* Elemen terpilih yang terpotong frame: garis pilihan dan pegangannya digambar utuh di atas potongan. */}
+            {selNode && clippedSel && (
+              <div
+                data-ui=""
+                className="pointer-events-none absolute"
+                style={{ left: clippedSel.x, top: clippedSel.y, width: clippedSel.w, height: clippedSel.h, outline: `${1.5 / zoom}px dashed #1c1b29` }}
+              >
+                {!lockedNode(selNode) && selNode.type !== "palette" && tool === "select" && editing !== selNode.id && (
+                  <Handles zoom={zoom} corners={selNode.type === "text" ? ["ne", "se"] : ["nw", "ne", "sw", "se"]} onDown={(e, c2) => onResizeDown(e, selNode.id, "nodes", c2)} />
+                )}
+              </div>
+            )}
+
+            {draft?.kind === "frame" && (
+              <div className="pointer-events-none absolute bg-white" style={{ left: draft.r.x, top: draft.r.y, width: draft.r.w, height: draft.r.h, outline: `${1.5 / zoom}px solid #1c1b29` }} />
+            )}
             {draft?.kind === "marquee" && (
               <div
                 className="pointer-events-none absolute rounded-[4px] border-solid border-ink bg-ink/5"
@@ -1678,7 +1931,7 @@ export function MoodboardCanvas({
               <div className="pointer-events-auto flex max-w-[380px] flex-col items-start gap-2 rounded-[20px] border-[1.5px] border-dashed border-outline bg-surface px-7 py-6">
                 <p className="text-[16px] font-extrabold">Papan {boardName} masih kosong</p>
                 <p className="text-[13px] leading-[1.5] text-muted">
-                  Seret foto referensi dari komputer ke sini, atau tempel link Instagram dan Pinterest dengan Ctrl+V. Mau mulai dari kerangka? Buat kelompok Dekor, Busana, dan Warna lalu isi satu per satu.
+                  Seret foto referensi dari komputer ke sini, atau tempel link Instagram dan Pinterest dengan Ctrl+V. Mau mulai dari kerangka? Buat section Dekor, Busana, dan Warna lalu isi satu per satu.
                 </p>
                 <button
                   type="button"
@@ -1686,7 +1939,7 @@ export function MoodboardCanvas({
                   onClick={starterGroups}
                   className="mt-1 inline-flex h-11 items-center rounded-xl bg-ground px-4 text-[13px] font-bold hover:bg-[#e8e7ef]"
                 >
-                  Buat kelompok awal
+                  Buat section awal
                 </button>
               </div>
             </div>
@@ -1723,6 +1976,41 @@ export function MoodboardCanvas({
               <ToolButton label="Tangan" hint="Geser kanvas (H, atau tahan Spasi)" on={tool === "hand"} onClick={() => setTool("hand")} icon={<Hand size={18} aria-hidden="true" />} />
               <ToolButton label="Sambung" hint="Sambung kartu (C)" on={tool === "link"} onClick={() => setTool("link")} icon={<Spline size={18} aria-hidden="true" />} />
               <span className="mx-1 h-6 w-px shrink-0 bg-line" aria-hidden="true" />
+              <Popover>
+                <PopoverTrigger
+                  title="Frame (F)"
+                  aria-pressed={tool === "frame"}
+                  aria-label="Frame (F)"
+                  className={cx(TOOL_CLASS, tool === "frame" ? "bg-accent text-ink" : "hover:bg-ground")}
+                >
+                  <FrameIcon size={18} aria-hidden="true" />
+                </PopoverTrigger>
+                <PopoverContent side="top" align="center" className="flex w-[280px] flex-col gap-1 p-1.5">
+                  <button
+                    type="button"
+                    aria-pressed={tool === "frame"}
+                    onClick={() => setTool("frame")}
+                    className={cx("flex min-h-11 items-center justify-between gap-2 rounded-xl px-3 text-left text-[13px] font-bold", tool === "frame" ? "bg-ground" : "hover:bg-sunken")}
+                  >
+                    Gambar bebas
+                    <span className="text-[12px] font-semibold text-muted">Seret di kanvas</span>
+                  </button>
+                  <div className="mx-2 my-1 h-px bg-line" aria-hidden="true" />
+                  {FRAME_PRESETS.map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => addFrame(f)}
+                      className="flex min-h-11 items-center justify-between gap-2 rounded-xl px-3 text-left text-[13px] font-bold hover:bg-sunken"
+                    >
+                      {f.name}
+                      <span className="text-[12px] font-semibold tabular text-muted">
+                        {f.w} × {f.h}
+                      </span>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
               <ToolButton label="Pena" hint="Gambar bebas (P)" on={tool === "pen"} onClick={() => setTool("pen")} icon={<PenLine size={18} aria-hidden="true" />} />
               <ToolButton label="Hapus" hint="Penghapus goresan pena (E)" on={tool === "eraser"} onClick={() => setTool("eraser")} icon={<Eraser size={18} aria-hidden="true" />} />
               <Popover>
@@ -1809,7 +2097,7 @@ export function MoodboardCanvas({
                 onClick={() => addNode({ type: "palette", title: "Palet baru", swatches: ["#f4f1ea", "#d9d8e4", "#7c8b6a"] })}
                 icon={<Palette size={18} aria-hidden="true" />}
               />
-              <ToolButton label="Kelompok" hint="Tambah kelompok kosong, misalnya Pelaminan atau Busana" onClick={addGroup} icon={<SquareDashed size={18} aria-hidden="true" />} />
+              <ToolButton label="Section" hint="Tambah section, area berwarna untuk Pelaminan, Busana, dan lainnya" onClick={addGroup} icon={<SquareDashed size={18} aria-hidden="true" />} />
             </div>
           </div>
           {notice && (
@@ -1867,13 +2155,32 @@ export function MoodboardCanvas({
                     <ChevronsDown size={17} aria-hidden="true" />
                   </IconAction>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button type="button" onClick={groupSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                    <Group size={16} aria-hidden="true" />
-                    Kelompokkan
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    title="Bungkus dengan frame (Ctrl+Alt+G)"
+                    onClick={frameSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <FrameIcon size={15} aria-hidden="true" />
+                    Frame
                   </button>
-                  <button type="button" onClick={duplicateSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                    <Copy size={16} aria-hidden="true" />
+                  <button
+                    type="button"
+                    title="Jadikan section (Ctrl+G)"
+                    onClick={groupSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <Group size={15} aria-hidden="true" />
+                    Section
+                  </button>
+                  <button
+                    type="button"
+                    title="Duplikat (Ctrl+D)"
+                    onClick={duplicateSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <Copy size={15} aria-hidden="true" />
                     Duplikat
                   </button>
                 </div>
@@ -1886,6 +2193,11 @@ export function MoodboardCanvas({
           ) : selNode ? (
             <>
               <PanelHead label={PANEL_LABEL[selNode.type]} onDone={() => setSel(null)} />
+              {selNode.type === "frame" && (
+                <Section>
+                  <TextField label="Nama frame" value={selNode.title} max={120} placeholder="Misal: Story pengumuman" onChange={(v) => patchNode(selNode.id, { title: v }, `title:${selNode.id}`)} />
+                </Section>
+              )}
               {isCard(selNode) && (
                 <Section>
                   <TextField label="Judul" value={selNode.title} max={120} onChange={(v) => patchNode(selNode.id, { title: v }, `title:${selNode.id}`)} />
@@ -1898,6 +2210,30 @@ export function MoodboardCanvas({
                   lockWH={selNode.type === "palette"}
                   onChange={(p) => setGeometry(selNode, p)}
                 />
+                {selNode.type === "frame" && (
+                  <div className="flex gap-2">
+                    <div className="min-w-0 flex-1">
+                      <SelectField
+                        aria-label="Ukuran siap pakai"
+                        value={FRAME_PRESETS.find((f) => f.w === box(selNode).w && f.h === box(selNode).h)?.id ?? ""}
+                        onValueChange={(v) => {
+                          const f = FRAME_PRESETS.find((x) => x.id === v);
+                          if (f) setGeometry(selNode, { w: f.w, h: f.h });
+                        }}
+                        options={[{ value: "", label: "Ukuran bebas" }, ...FRAME_PRESETS.map((f) => ({ value: f.id, label: `${f.name}, ${f.w} × ${f.h}` }))]}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Tukar lebar dan tinggi"
+                      title="Tukar lebar dan tinggi"
+                      onClick={() => setGeometry(selNode, { w: box(selNode).h, h: box(selNode).w })}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-ground hover:bg-[#e8e7ef]"
+                    >
+                      <RotateCw size={16} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
                 {selNode.locked && (
                   <p className="text-[12px] leading-[1.5] text-muted">
                     Terkunci, jadi tidak bisa dipilih atau digeser di kanvas.{" "}
@@ -1907,6 +2243,49 @@ export function MoodboardCanvas({
                   </p>
                 )}
               </Section>
+              {selNode.type === "frame" && (
+                <>
+                  <Section title="Latar dan isi">
+                    <ColorField label="Warna latar frame" value={selNode.fill ?? "#ffffff"} swatches={[...MOOD_FILLS, ...boardColors]} onChange={(fill) => patchNode(selNode.id, { fill }, `fill:${selNode.id}`)} />
+                    <button
+                      type="button"
+                      aria-pressed={selNode.clip !== false}
+                      onClick={() => patchNode(selNode.id, { clip: selNode.clip === false ? undefined : false })}
+                      className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-ground px-3 text-left text-[13px] font-bold hover:bg-[#e8e7ef]"
+                    >
+                      Potong isi di tepi frame
+                      <span className={cx("flex h-6 w-10 shrink-0 items-center rounded-full p-0.5 transition-colors duration-150", selNode.clip !== false ? "bg-ink" : "bg-[#cfced9]")} aria-hidden="true">
+                        <span className={cx("size-5 rounded-full bg-white transition-transform duration-150", selNode.clip !== false && "translate-x-4")} />
+                      </span>
+                    </button>
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      {descendants(selNode.id).length} elemen di dalam frame. Lepas elemen di atas frame untuk memasukkannya, seret keluar untuk mengeluarkannya.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => unframe([selNode.id])}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]"
+                    >
+                      <Ungroup size={16} aria-hidden="true" />
+                      Lepas frame, isinya tetap
+                    </button>
+                  </Section>
+                  <Section title="Ekspor">
+                    <button
+                      type="button"
+                      disabled={exporting}
+                      onClick={() => exportFrame(selNode)}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ink text-[13px] font-bold text-white hover:bg-[#2e2d40] disabled:opacity-60"
+                    >
+                      <Download size={16} aria-hidden="true" />
+                      {exporting ? "Menyiapkan gambar…" : "Unduh PNG"}
+                    </button>
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      Gambar {exportSize(box(selNode))} piksel. Hanya isi frame yang ikut, tanpa garis pilihan.
+                    </p>
+                  </Section>
+                </>
+              )}
               {selNode.type === "text" && (
                 <Section title="Teks">
                   <label className="flex flex-col gap-1.5">
@@ -2052,7 +2431,7 @@ export function MoodboardCanvas({
                   <p className="text-[12px] text-muted">Tag buatan sendiri muncul di semua papan. Tag yang tidak dipakai kartu mana pun hilang dari daftar.</p>
                 </Section>
               )}
-              {!isStroke(selNode) && b.nodes.filter((n) => !isStroke(n)).length > 1 && (
+              {!isStroke(selNode) && selNode.type !== "frame" && b.nodes.filter((n) => !isStroke(n) && n.type !== "frame").length > 1 && (
                 <Section title="Sambungan">
                   <div className="flex gap-2">
                     <div className="min-w-0 flex-1">
@@ -2062,7 +2441,7 @@ export function MoodboardCanvas({
                         onValueChange={setLinkTarget}
                         options={[
                           { value: "", label: "Pilih elemen" },
-                          ...b.nodes.filter((n) => n.id !== selNode.id && !isStroke(n)).map((n) => ({ value: n.id, label: `${TYPE_LABEL[n.type]}: ${nodeLabel(n)}` })),
+                          ...b.nodes.filter((n) => n.id !== selNode.id && !isStroke(n) && n.type !== "frame").map((n) => ({ value: n.id, label: `${TYPE_LABEL[n.type]}: ${nodeLabel(n)}` })),
                         ]}
                       />
                     </div>
@@ -2095,19 +2474,42 @@ export function MoodboardCanvas({
                     <ChevronsDown size={17} aria-hidden="true" />
                   </IconAction>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button type="button" onClick={groupSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                    <Group size={16} aria-hidden="true" />
-                    Kelompokkan
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    title="Bungkus dengan frame (Ctrl+Alt+G)"
+                    onClick={frameSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <FrameIcon size={15} aria-hidden="true" />
+                    Frame
                   </button>
-                  <button type="button" onClick={duplicateSelection} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-ground text-[13px] font-bold hover:bg-[#e8e7ef]">
-                    <Copy size={16} aria-hidden="true" />
+                  <button
+                    type="button"
+                    title="Jadikan section (Ctrl+G)"
+                    onClick={groupSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <Group size={15} aria-hidden="true" />
+                    Section
+                  </button>
+                  <button
+                    type="button"
+                    title="Duplikat (Ctrl+D)"
+                    onClick={duplicateSelection}
+                    className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ground text-[12px] font-bold hover:bg-[#e8e7ef]"
+                  >
+                    <Copy size={15} aria-hidden="true" />
                     Duplikat
                   </button>
                 </div>
               </Section>
               <Section>
-                <DangerButton onClick={removeSelection}>Hapus {isCard(selNode) ? "kartu" : "elemen"}</DangerButton>
+                <DangerButton onClick={removeSelection}>
+                  {selNode.type === "frame" && descendants(selNode.id).length
+                    ? `Hapus frame dan ${descendants(selNode.id).length} elemen di dalamnya`
+                    : `Hapus ${isCard(selNode) ? "kartu" : "elemen"}`}
+                </DangerButton>
               </Section>
             </>
           ) : selEdge ? (
@@ -2132,9 +2534,9 @@ export function MoodboardCanvas({
             </>
           ) : selGroup ? (
             <>
-              <PanelHead label="Kelompok" onDone={() => setSel(null)} />
+              <PanelHead label="Section" onDone={() => setSel(null)} />
               <Section>
-                <TextField label="Nama kelompok" value={selGroup.title} max={80} placeholder="Misal: Pelaminan dan dekor" onChange={(v) => patchGroup(selGroup.id, { title: v }, `title:${selGroup.id}`)} />
+                <TextField label="Nama section" value={selGroup.title} max={80} placeholder="Misal: Pelaminan dan dekor" onChange={(v) => patchGroup(selGroup.id, { title: v }, `title:${selGroup.id}`)} />
               </Section>
               <Section title="Posisi dan ukuran">
                 <GeometryFields r={selGroup} onChange={(p) => setGroupGeometry(selGroup, p)} />
@@ -2168,7 +2570,7 @@ export function MoodboardCanvas({
               </Section>
               <Section title="Isi">
                 <p className="text-[13px] leading-[1.5] text-muted">
-                  {b.nodes.filter((n) => owners.get(n.id) === selGroup.id).length} elemen di dalam kelompok ini. Elemen ikut berpindah saat kelompok digeser.
+                  {b.nodes.filter((n) => owners.get(n.id) === selGroup.id).length} elemen di dalam section ini. Elemen ikut berpindah saat section digeser.
                 </p>
                 <div className="grid grid-cols-2 gap-1.5">
                   <button
@@ -2190,7 +2592,7 @@ export function MoodboardCanvas({
                 </div>
               </Section>
               <Section>
-                <DangerButton onClick={removeSelection}>Hapus kelompok</DangerButton>
+                <DangerButton onClick={removeSelection}>Hapus section</DangerButton>
                 <p className="text-center text-[12px] text-muted">Elemen di dalamnya tidak ikut terhapus.</p>
               </Section>
             </>
@@ -2199,7 +2601,7 @@ export function MoodboardCanvas({
               <div className="flex min-h-14 flex-col justify-center border-b border-line px-4 py-2">
                 <h2 className="text-[14px] font-extrabold">Papan {boardName}</h2>
                 <p className="text-[12px] text-muted">
-                  {b.nodes.length} elemen dan {b.groups.length} kelompok
+                  {b.nodes.length} elemen dan {b.groups.length} section
                 </p>
               </div>
               <Section>
@@ -2210,15 +2612,18 @@ export function MoodboardCanvas({
                   <Help title="Susun">
                     Tarik elemen untuk memindah. Tarik area kosong untuk memilih beberapa sekaligus. Geser kanvas dengan alat Tangan, tahan Spasi, atau satu jari di tablet. Ctrl dan scroll, atau cubit dua jari, untuk zoom.
                   </Help>
-                  <Help title="Layer dan kelompok">
-                    Ctrl+G mengelompokkan pilihan, Ctrl+Shift+G melepasnya. Ctrl+] dan Ctrl+[ memindah lapisan, tambah Shift untuk paling depan atau paling belakang. Kunci dan sembunyikan dari panel Layer.
+                  <Help title="Frame dan section">
+                    Frame (F) seperti kertas berukuran pasti: isinya terpotong di tepi dan bisa diunduh jadi PNG. Section adalah area berwarna untuk mengelompokkan. Ctrl+Alt+G membungkus pilihan dengan frame, Ctrl+G menjadikannya section, Ctrl+Shift+G melepas.
+                  </Help>
+                  <Help title="Layer">
+                    Ctrl+] dan Ctrl+[ memindah lapisan, tambah Shift untuk paling depan atau paling belakang. Kunci dan sembunyikan dari panel Layer.
                   </Help>
                   <Help title="Dari link">
                     Tempel link Instagram, Pinterest, atau situs lain dengan Ctrl+V di kanvas, atau pakai alat Link di bawah. Foto tidak terpotong, carousel jadi satu kartu, dan video bisa diputar.
                   </Help>
                   <Help title="Bersama">Kursor anggota lain terlihat dengan nama di bawahnya. Klik avatar di bar atas untuk mengikuti layarnya. Perubahan tersimpan otomatis.</Help>
                   <Help title="Keyboard">
-                    V Pilih, H Tangan, C Sambung, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
+                    V Pilih, H Tangan, C Sambung, F Frame, P Pena, E Penghapus, R Bentuk, T Teks. Ctrl+Z batal, Ctrl+Shift+Z ulangi, Ctrl+D duplikat, Delete hapus, Esc batal.
                   </Help>
                 </div>
               </Section>
@@ -2292,7 +2697,8 @@ function Handles({ zoom, corners, inset = -2, onDown }: { zoom: number; corners:
           key={c}
           aria-hidden="true"
           onPointerDown={(e) => onDown(e, c)}
-          className={cx("absolute z-[3] flex items-center justify-center", c === "nw" || c === "se" ? "cursor-nwse-resize" : "cursor-nesw-resize")}
+          data-ui=""
+          className={cx("pointer-events-auto absolute z-[3] flex items-center justify-center", c === "nw" || c === "se" ? "cursor-nwse-resize" : "cursor-nesw-resize")}
           style={{
             width: s,
             height: s,

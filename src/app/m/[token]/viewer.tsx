@@ -6,10 +6,15 @@ import type { MoodData, MoodNode } from "@/db/schema";
 import { MOOD_GROUP_COLORS } from "@/lib/moodboard";
 import { cx } from "@/components/kit";
 import {
+  ancestors,
   boxOf,
+  clipPath,
   contentBounds,
   curve,
+  drawOrder,
   EdgeLabel,
+  FrameBody,
+  frameClip,
   insideRect,
   isCard,
   MediaCard,
@@ -26,9 +31,19 @@ const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 3;
 
 /** Kanvas baca-saja untuk vendor: geser, zoom, cubit, dan buka foto. Bisa dipakai di HP. */
-export function MoodboardViewer({ data: all, token }: { data: MoodData; token: string }) {
-  // Layer yang disembunyikan pasangan di editor tidak ikut terlihat oleh vendor. Sambungan ke elemen itu ikut hilang.
-  const data = { ...all, nodes: all.nodes.filter((n) => !n.hidden), groups: all.groups.filter((g) => !g.hidden) };
+/**
+ * `fileBase`: awalan alamat foto. Link vendor memakai /m/[token]/foto/ (tanpa login), anggota yang
+ * hanya boleh melihat moodboard memakai /api/files/ (izin anggota).
+ */
+export function MoodboardViewer({ data: all, fileBase }: { data: MoodData; fileBase: string }) {
+  // Layer yang disembunyikan pasangan di editor (termasuk isi frame yang disembunyikan) tidak ikut terlihat
+  // oleh vendor; sambungan ke elemen itu ikut hilang. Isi frame digambar tepat setelah frame-nya.
+  const allById = new Map(all.nodes.map((n) => [n.id, n]));
+  const data = {
+    ...all,
+    nodes: drawOrder(all.nodes).filter((n) => !n.hidden && !ancestors(n, allById).some((f) => f.hidden)),
+    groups: all.groups.filter((g) => !g.hidden),
+  };
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 16, y: 16 });
   const [viewer, setViewer] = useState<string | null>(null);
@@ -38,10 +53,10 @@ export function MoodboardViewer({ data: all, token }: { data: MoodData; token: s
     { kind: "pan"; sx: number; sy: number; px: number; py: number; photo: string | null } | { kind: "pinch"; d0: number; zoom0: number; wx: number; wy: number } | null
   >(null);
 
-  const src = (n: MoodNode) => (n.fileId ? `/m/${token}/foto/${n.fileId}` : null);
+  const src = (n: MoodNode) => (n.fileId ? `${fileBase}${n.fileId}` : null);
   const box = (n: MoodNode) => boxOf(n);
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
-  const mediaSrc = (fileId: string) => `/m/${token}/foto/${fileId}`;
+  const mediaSrc = (fileId: string) => `${fileBase}${fileId}`;
   const photos = data.nodes.filter((n) => (n.type === "photo" && n.fileId) || n.type === "media");
   const opens = (n: MoodNode) => (n.type === "photo" && !!n.fileId) || n.type === "media";
 
@@ -180,8 +195,9 @@ export function MoodboardViewer({ data: all, token }: { data: MoodData; token: s
                   card && (n.type === "note" ? "border-[#ebddba] bg-note-bg" : "border-line bg-surface"),
                   opens(n) && "cursor-zoom-in",
                 )}
-                style={{ left: n.x, top: n.y, width: r.w, height: n.type === "text" ? undefined : r.h }}
+                style={{ left: n.x, top: n.y, width: r.w, height: n.type === "text" ? undefined : r.h, clipPath: clipPath(r, frameClip(n, byId, box)) }}
               >
+                {n.type === "frame" && <FrameBody n={n} zoom={zoom} />}
                 {n.type === "photo" && <PhotoCard n={n} src={src(n)} showOpen={false} onOpen={() => setViewer(n.id)} />}
                 {n.type === "media" && <MediaCard n={n} src={mediaSrc} swipe showOpen={false} onOpen={() => setViewer(n.id)} />}
                 {n.type === "note" && <NoteCard n={n} />}

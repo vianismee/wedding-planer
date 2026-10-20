@@ -10,6 +10,7 @@ import {
   jsonb,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { Perms } from "@/lib/roles";
 
 const id = () =>
   text("id")
@@ -116,12 +117,30 @@ export const member = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: text("role").notNull(), // pemilik | pasangan | keluarga | panitia
+    // pemilik, peran bawaan (pasangan | keluarga | panitia), atau kunci peran buatan sendiri (wedding_role.key).
+    role: text("role").notNull(),
+    // Pengecualian izin khusus anggota ini, menimpa izin perannya per halaman. Null = ikut peran.
+    perms: jsonb("perms").$type<Partial<Perms>>(),
     // Menu pilihan untuk capsule nav di HP (maksimal 4). Null = urutan bawaan.
     capsuleItems: jsonb("capsule_items").$type<string[]>(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("member_wedding_user_uq").on(t.weddingId, t.userId)],
+);
+
+// Peran per pernikahan: peran bawaan yang izinnya diubah (key = pasangan | keluarga | panitia),
+// atau peran buatan sendiri (key acak). Peran bawaan yang belum diubah tidak punya baris di sini.
+export const weddingRole = pgTable(
+  "wedding_role",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    perms: jsonb("perms").$type<Perms>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("wedding_role_key_uq").on(t.weddingId, t.key)],
 );
 
 export const invite = pgTable(
@@ -261,15 +280,40 @@ export const expense = pgTable(
 
 /* ---------- Vendor ---------- */
 
-export const offer = pgTable(
-  "offer",
+// Calon vendor yang sedang dibandingkan. Kontak, ketersediaan, dan DP diisi sekali di sini dan berlaku
+// untuk semua paketnya (tabel offer), kecuali paket yang punya DP sendiri.
+export const prospect = pgTable(
+  "prospect",
   {
     id: id(),
     weddingId: weddingRef(),
     categoryId: text("category_id")
       .notNull()
       .references(() => budgetCategory.id, { onDelete: "cascade" }),
-    vendorName: text("vendor_name").notNull(),
+    name: text("name").notNull(),
+    contact: text("contact"),
+    availability: text("availability"),
+    available: boolean("available").notNull().default(true),
+    notes: text("notes"),
+    dpType: text("dp_type").notNull().default("percent"), // percent | nominal | none
+    dpPercent: integer("dp_percent").notNull().default(30),
+    dpAmount: money("dp_amount"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("prospect_wedding_idx").on(t.weddingId)],
+);
+
+// Satu paket dari calon vendor (prospect).
+export const offer = pgTable(
+  "offer",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    prospectId: text("prospect_id")
+      .notNull()
+      .references(() => prospect.id, { onDelete: "cascade" }),
+    // Paket ini punya DP sendiri (kolom dp_* di bawah); bila tidak, DP calon vendornya yang dipakai.
+    dpCustom: boolean("dp_custom").notNull().default(false),
     packageName: text("package_name"),
     price: money("price"), // harga paket
     // Isi paket sebagai daftar, dan add-on di luar paket. Total = price + jumlah add-on.
@@ -279,10 +323,7 @@ export const offer = pgTable(
     // Cara DP: persen dari total, nominal tetap, atau tanpa DP.
     dpType: text("dp_type").notNull().default("percent"), // percent | nominal | none
     dpAmount: money("dp_amount"),
-    availability: text("availability"),
-    available: boolean("available").notNull().default(true),
     notes: text("notes"),
-    contact: text("contact"),
     attachmentFileId: text("attachment_file_id").references(() => file.id, { onDelete: "set null" }),
     status: text("status").notNull().default("dibandingkan"), // dibandingkan | dipilih
     createdAt: createdAt(),
@@ -461,7 +502,7 @@ export type MoodMedia = { fileId: string; kind: "image" | "video"; w?: number; h
 
 export type MoodNode = {
   id: string;
-  type: "photo" | "note" | "palette" | "text" | "shape" | "draw" | "media";
+  type: "photo" | "note" | "palette" | "text" | "shape" | "draw" | "media" | "frame";
   x: number;
   y: number;
   // Ukuran bebas setelah di-resize. Kosong = ukuran bawaan tipe kartu.
@@ -478,6 +519,10 @@ export type MoodNode = {
   // Dari panel Layer: dikunci (tidak bisa dipilih atau digeser di kanvas) dan disembunyikan.
   locked?: boolean;
   hidden?: boolean;
+  // Frame tempat elemen ini berada (id elemen bertipe "frame"). Kosong = langsung di kanvas.
+  parent?: string;
+  // Frame: isi yang keluar dari tepi frame dipotong, kecuali clip bernilai false.
+  clip?: boolean;
   // Teks bebas di kanvas.
   font?: string;
   fontSize?: number;
@@ -527,6 +572,7 @@ export type BudgetCategory = typeof budgetCategory.$inferSelect;
 export type FundingSource = typeof fundingSource.$inferSelect;
 export type Expense = typeof expense.$inferSelect;
 export type Offer = typeof offer.$inferSelect;
+export type Prospect = typeof prospect.$inferSelect;
 export type Vendor = typeof vendor.$inferSelect;
 export type PaymentTerm = typeof paymentTerm.$inferSelect;
 export type Task = typeof task.$inferSelect;

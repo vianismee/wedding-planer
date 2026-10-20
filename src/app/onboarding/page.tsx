@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getContext, getSession } from "@/lib/session";
-import { pendingInviteFor } from "@/lib/invites";
-import { ROLE_HELP, ROLE_LABEL, type Role } from "@/lib/roles";
+import { inviteRoleInfo, pendingInviteFor } from "@/lib/invites";
 import { AcceptButton } from "../undangan/[token]/accept";
 import { Wizard } from "./wizard";
 
@@ -19,7 +18,7 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
   // Tamu yang diundang tapi tersesat ke onboarding: tawarkan undangannya dulu.
   const pending = !abaikan ? await pendingInviteFor(session.user.email) : null;
   if (pending) {
-    const role = pending.invite.role as Exclude<Role, "pemilik">;
+    const role = await inviteRoleInfo(pending.wedding.id, pending.invite.role);
     return (
       <main className="flex min-h-dvh items-center justify-center p-4">
         <div className="flex w-full max-w-[460px] flex-col gap-5 rounded-[24px] bg-surface p-6 sm:p-8">
@@ -31,9 +30,9 @@ export default async function OnboardingPage({ searchParams }: { searchParams: P
           </div>
           <div className="rounded-[18px] bg-sunken p-4 text-[14px]">
             <p>
-              Kamu diundang sebagai <strong>{ROLE_LABEL[role]}</strong>.
+              Kamu diundang sebagai <strong>{role.name}</strong>.
             </p>
-            <p className="text-muted">{ROLE_HELP[role]}</p>
+            <p className="text-muted">{role.summary}</p>
           </div>
           <AcceptButton token={pending.invite.token} email={session.user.email} />
           <Link href={`/onboarding?abaikan=1${baru ? "&baru=1" : ""}`} className="text-center text-[13px] font-semibold underline">

@@ -8,6 +8,7 @@ import {
   Circle,
   Eye,
   EyeOff,
+  Frame,
   Image as ImageIcon,
   Link2,
   Lock,
@@ -21,7 +22,7 @@ import {
   Unlock,
 } from "lucide-react";
 import type { MoodData, MoodGroup, MoodNode } from "@/db/schema";
-import type { MoodRect } from "@/lib/moodboard";
+import { cleanParents, type MoodRect } from "@/lib/moodboard";
 import { cx } from "@/components/kit";
 import { insideRect } from "./board-view";
 
@@ -42,17 +43,21 @@ function NodeIcon({ n }: { n: MoodNode }) {
               ? Type
               : n.type === "draw"
                 ? PenLine
-                : SHAPE_ICON[n.shape ?? "rect"];
+                : n.type === "frame"
+                  ? Frame
+                  : SHAPE_ICON[n.shape ?? "rect"];
   return <Icon size={15} className="shrink-0 text-muted" aria-hidden="true" />;
 }
 
 /**
- * Kelompok pemilik tiap elemen. Keanggotaan kelompok mengikuti posisi (titik tengah elemen di dalam
- * kotak kelompok), sama seperti saat kelompok digeser. Bila kelompok bertumpuk, yang terkecil menang.
+ * Section pemilik tiap elemen yang langsung di kanvas. Keanggotaan section mengikuti posisi (titik
+ * tengah elemen di dalam kotak section), sama seperti saat section digeser. Bila section bertumpuk,
+ * yang terkecil menang. Isi frame tidak dihitung: tempatnya di bawah frame-nya.
  */
 export function groupOwners(d: MoodData, box: (n: MoodNode) => MoodRect) {
   const owner = new Map<string, string>();
-  for (const n of d.nodes) {
+  for (const n of cleanParents(d.nodes)) {
+    if (n.parent) continue;
     let best: MoodGroup | undefined;
     for (const g of d.groups) if (insideRect(box(n), g) && (!best || g.w * g.h < best.w * best.h)) best = g;
     if (best) owner.set(n.id, best.id);
@@ -69,7 +74,8 @@ export type LayerActions = {
 };
 
 /**
- * Panel Layer di kiri: kelompok seperti folder berisi elemen di dalamnya, lalu elemen lepas.
+ * Panel Layer di kiri: section seperti folder berisi elemen di dalamnya, frame berisi anaknya
+ * (bisa bersarang), lalu elemen lepas.
  * Urutan dari atas ke bawah sama dengan tumpukan di kanvas (paling atas = paling depan).
  * Klik untuk memilih, Shift atau Ctrl untuk menambah, klik dua kali untuk mengganti nama,
  * seret untuk mengubah urutan, dan ikon mata dan gembok untuk menyembunyikan atau mengunci.
@@ -92,8 +98,9 @@ export function LayersPanel({
   const [dragging, setDragging] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; above: boolean } | null>(null);
 
-  const top = [...data.nodes].reverse();
-  const loose = top.filter((n) => !owners.has(n.id));
+  const top = [...cleanParents(data.nodes)].reverse();
+  const childrenOf = (id: string) => top.filter((n) => n.parent === id);
+  const loose = top.filter((n) => !n.parent && !owners.has(n.id));
   const groups = [...data.groups].reverse();
   const isSel = (kind: "node" | "group", id: string) => sel?.kind === kind && sel.ids.includes(id);
 
@@ -137,7 +144,7 @@ export function LayersPanel({
 
   function row(kind: "node" | "group", item: MoodNode | MoodGroup, depth: number, extra?: React.ReactNode) {
     const on = isSel(kind, item.id);
-    const name = kind === "node" ? label(item as MoodNode) : item.title || "Kelompok";
+    const name = kind === "node" ? label(item as MoodNode) : item.title || "Section";
     const click = (e: MouseEvent) => actions.select(kind, item.id, e.shiftKey || e.ctrlKey || e.metaKey);
     const line = drop?.id === item.id ? (drop.above ? "before:top-0" : "before:bottom-0") : null;
     return (
@@ -214,37 +221,48 @@ export function LayersPanel({
     );
   }
 
+  function chevron(id: string, name: string, count: number, on: boolean) {
+    const open = !closed.has(id);
+    return (
+      <button
+        type="button"
+        aria-label={open ? `Tutup ${name}` : `Buka ${name}`}
+        aria-expanded={open}
+        disabled={!count}
+        onClick={() => toggleOpen(id)}
+        className={cx("-ml-1 flex size-7 shrink-0 items-center justify-center rounded-md disabled:invisible", on ? "hover:bg-white/15" : "hover:bg-[#e8e7ef]")}
+      >
+        {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+      </button>
+    );
+  }
+
+  /** Baris elemen, dan bila frame yang terbuka, baris anak-anaknya di bawahnya. */
+  function nodeTree(n: MoodNode, depth: number): React.ReactNode[] {
+    if (n.type !== "frame") return [row("node", n, depth)];
+    const kids = childrenOf(n.id);
+    return [
+      row("node", n, depth, chevron(n.id, n.title || "frame", kids.length, isSel("node", n.id))),
+      ...(closed.has(n.id) ? [] : kids.flatMap((c) => nodeTree(c, depth + 1))),
+    ];
+  }
+
   if (!data.nodes.length && !data.groups.length)
     return <p className="px-2 text-[13px] leading-[1.5] text-muted">Belum ada layer. Elemen yang ditaruh di kanvas muncul di sini, yang paling depan di paling atas.</p>;
 
   return (
     <div className="flex flex-col gap-px">
       {groups.map((g) => {
-        const kids = top.filter((n) => owners.get(n.id) === g.id);
-        const open = !closed.has(g.id);
+        const kids = top.filter((n) => !n.parent && owners.get(n.id) === g.id);
         return (
           <div key={g.id} className="flex flex-col gap-px">
-            {row(
-              "group",
-              g,
-              0,
-              <button
-                type="button"
-                aria-label={open ? `Tutup ${g.title || "kelompok"}` : `Buka ${g.title || "kelompok"}`}
-                aria-expanded={open}
-                disabled={!kids.length}
-                onClick={() => toggleOpen(g.id)}
-                className={cx("-ml-1 flex size-7 shrink-0 items-center justify-center rounded-md disabled:invisible", isSel("group", g.id) ? "hover:bg-white/15" : "hover:bg-[#e8e7ef]")}
-              >
-                {open ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-              </button>,
-            )}
-            {open && kids.map((n) => row("node", n, 1))}
+            {row("group", g, 0, chevron(g.id, g.title || "section", kids.length, isSel("group", g.id)))}
+            {!closed.has(g.id) && kids.flatMap((n) => nodeTree(n, 1))}
           </div>
         );
       })}
       {loose.length > 0 && groups.length > 0 && <div className="mx-2 my-1.5 h-px bg-line" aria-hidden="true" />}
-      {loose.map((n) => row("node", n, 0))}
+      {loose.flatMap((n) => nodeTree(n, 0))}
     </div>
   );
 }

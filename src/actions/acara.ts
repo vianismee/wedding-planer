@@ -48,7 +48,7 @@ async function ownEvent(weddingId: string, id: string) {
 
 export async function addEvent(fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     const data = parseEvent(fd);
     const existing = await db.select().from(schema.event).where(eq(schema.event.weddingId, ctx.wedding.id));
     const id = crypto.randomUUID();
@@ -60,7 +60,7 @@ export async function addEvent(fd: FormData): Promise<ActionResult> {
 
 export async function updateEvent(id: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     await ownEvent(ctx.wedding.id, id);
     await db.update(schema.event).set(parseEvent(fd)).where(eq(schema.event.id, id));
     done();
@@ -69,7 +69,7 @@ export async function updateEvent(id: string, fd: FormData): Promise<ActionResul
 
 export async function deleteEvent(id: string): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     await ownEvent(ctx.wedding.id, id);
     await db.delete(schema.event).where(eq(schema.event.id, id));
     done();
@@ -79,7 +79,7 @@ export async function deleteEvent(id: string): Promise<ActionResult> {
 /** Menggeser urutan acara satu langkah ke atas atau bawah. */
 export async function moveEvent(id: string, dir: -1 | 1): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     const list = await db
       .select()
       .from(schema.event)
@@ -99,7 +99,7 @@ export async function moveEvent(id: string, dir: -1 | 1): Promise<ActionResult> 
 /** Membuat atau mencabut link rundown baca-saja untuk panitia. */
 export async function setEventShare(id: string, enabled: boolean): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     await ownEvent(ctx.wedding.id, id);
     const token = enabled ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : null;
     await db.update(schema.event).set({ shareToken: token }).where(eq(schema.event.id, id));
@@ -128,7 +128,7 @@ async function sortRundown(eventId: string) {
 
 export async function addRundown(eventId: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     await ownEvent(ctx.wedding.id, eventId);
     const data = rundownSchema.parse({ time: str(fd, "time"), activity: str(fd, "activity"), pic: optStr(fd, "pic") });
     await db.insert(schema.rundownItem).values({ ...data, eventId, weddingId: ctx.wedding.id, sortOrder: 999 });
@@ -139,7 +139,7 @@ export async function addRundown(eventId: string, fd: FormData): Promise<ActionR
 
 export async function updateRundown(id: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     const data = rundownSchema.parse({ time: str(fd, "time"), activity: str(fd, "activity"), pic: optStr(fd, "pic") });
     const [r] = await db
       .update(schema.rundownItem)
@@ -154,7 +154,7 @@ export async function updateRundown(id: string, fd: FormData): Promise<ActionRes
 
 export async function deleteRundown(id: string): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     await db
       .delete(schema.rundownItem)
       .where(and(eq(schema.rundownItem.id, id), eq(schema.rundownItem.weddingId, ctx.wedding.id)));
@@ -170,7 +170,7 @@ export async function deleteRundown(id: string): Promise<ActionResult> {
  */
 export async function addEventsFromTemplate(tpl: string, names: string[], withRundown: boolean): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     const adat = z.enum(["jawa", "sunda", "nasional"], { message: "Pilih template adat." }).parse(tpl);
     const picked = templateEvents(adat).filter((e) => names.includes(e.name));
     if (picked.length === 0) throw new UserError("Pilih minimal satu acara dari template.");
@@ -203,7 +203,7 @@ export async function addEventsFromTemplate(tpl: string, names: string[], withRu
 /** Mengisi rundown satu acara dari template: ditambahkan ke yang ada, atau mengganti seluruhnya. */
 export async function applyRundownTemplate(eventId: string, templateId: string, mode: string): Promise<ActionResult> {
   return run(async () => {
-    const ctx = await requireAction("acara.edit");
+    const ctx = await requireAction("acara");
     const e = await ownEvent(ctx.wedding.id, eventId);
     const m = z.enum(["append", "replace"]).parse(mode);
     const tpl = rundownTemplates().find((t) => t.id === templateId);

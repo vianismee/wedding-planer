@@ -10,7 +10,7 @@ import { hostOf, rupiah, rupiahShort } from "@/lib/format";
 import type { MaharItem } from "@/db/schema";
 
 
-export function MaharCard({ items }: { items: MaharItem[] }) {
+export function MaharCard({ items, canEdit }: { items: MaharItem[]; canEdit: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const opened = items.find((i) => i.id === openId) ?? null;
   const total = items.reduce((s, i) => s + i.value, 0);
@@ -24,21 +24,23 @@ export function MaharCard({ items }: { items: MaharItem[] }) {
           </h2>
           <p className="text-[13px] text-[#d9d8e4]">Disebut saat ijab kabul</p>
         </div>
-        <FormDialog
-          variant="icon"
-          triggerLabel="Tambah item mahar"
-          triggerClassName="text-white hover:bg-white/10"
-          title="Tambah item mahar"
-          description="Mahar dicatat terpisah dari seserahan. Tambahkan link pembelian bila dibeli online."
-          action={addMahar}
-          trigger={<Plus size={18} aria-hidden="true" />}
-        >
-          <MaharFields />
-        </FormDialog>
+        {canEdit && (
+          <FormDialog
+            variant="icon"
+            triggerLabel="Tambah item mahar"
+            triggerClassName="text-white hover:bg-white/10"
+            title="Tambah item mahar"
+            description="Mahar dicatat terpisah dari seserahan. Tambahkan link pembelian bila dibeli online."
+            action={addMahar}
+            trigger={<Plus size={18} aria-hidden="true" />}
+          >
+            <MaharFields />
+          </FormDialog>
+        )}
       </div>
 
       {items.length === 0 ? (
-        <p className="text-[14px] text-[#d9d8e4]">Mahar belum dicatat. Tambahkan item seperti emas atau seperangkat alat salat.</p>
+        <p className="text-[14px] text-[#d9d8e4]">Mahar belum dicatat.{canEdit && " Tambahkan item seperti emas atau seperangkat alat salat."}</p>
       ) : (
         <>
           <ul className="flex flex-col gap-1.5">
@@ -76,12 +78,12 @@ export function MaharCard({ items }: { items: MaharItem[] }) {
         </>
       )}
 
-      {opened && <MaharDetail key={opened.id} m={opened} onClose={() => setOpenId(null)} />}
+      {opened && <MaharDetail key={opened.id} m={opened} canEdit={canEdit} onClose={() => setOpenId(null)} />}
     </section>
   );
 }
 
-function MaharDetail({ m, onClose }: { m: MaharItem; onClose: () => void }) {
+function MaharDetail({ m, canEdit, onClose }: { m: MaharItem; canEdit: boolean; onClose: () => void }) {
   const [editing, setEditing] = useState(false);
   const [state, action, pending] = useActionState(async (_p: ActionResult | null, fd: FormData) => {
     const r = await updateMahar(m.id, fd);
@@ -132,27 +134,29 @@ function MaharDetail({ m, onClose }: { m: MaharItem; onClose: () => void }) {
               Buka link pembelian
             </a>
           ) : (
-            <p className="text-[13px] text-muted">Belum ada link pembelian. Tambahkan lewat tombol Ubah.</p>
+            <p className="text-[13px] text-muted">Belum ada link pembelian.{canEdit && " Tambahkan lewat tombol Ubah."}</p>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4">
-            <ActionButton
-              variant="danger"
-              confirm={`Hapus ${m.name} dari mahar?`}
-              action={async () => {
-                const r = await deleteMahar(m.id);
-                if (r.ok) onClose();
-                return r;
-              }}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              Hapus
-            </ActionButton>
-            <Button variant="ground" onClick={() => setEditing(true)}>
-              <Pencil size={14} aria-hidden="true" />
-              Ubah
-            </Button>
-          </div>
+          {canEdit && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ground pt-4">
+              <ActionButton
+                variant="danger"
+                confirm={`Hapus ${m.name} dari mahar?`}
+                action={async () => {
+                  const r = await deleteMahar(m.id);
+                  if (r.ok) onClose();
+                  return r;
+                }}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                Hapus
+              </ActionButton>
+              <Button variant="ground" onClick={() => setEditing(true)}>
+                <Pencil size={14} aria-hidden="true" />
+                Ubah
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </Modal>

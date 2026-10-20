@@ -6,10 +6,10 @@ import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
 import { addDays, dateShort, dateShorter, relativeDays, todayISO } from "@/lib/format";
 import { TASK_RANGES } from "@/lib/templates";
-import { ROLE_LABEL, type Role } from "@/lib/roles";
+import { roleName } from "@/lib/roles";
 import { addTask, deleteTask, updateTask } from "@/actions/checklist";
 import { ActionButton, FormDialog } from "@/components/forms";
-import { Field, Input, PageHeader, Status, cx } from "@/components/kit";
+import { Field, Input, PageHeader, Status, ViewOnly, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
 import { TaskCheck } from "./task-check";
@@ -24,7 +24,9 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
   const w = ctx.wedding;
   const today = todayISO();
   const { pic } = await searchParams;
-  const isPanitia = ctx.member.role === "panitia";
+  // "Tugas sendiri": hanya tugas yang ditugaskan ke anggota ini, seperti peran Panitia.
+  const isPanitia = ctx.perms.checklist === "own";
+  const edit = ctx.perms.checklist === "edit";
 
   const [all, members] = await Promise.all([
     db
@@ -42,7 +44,7 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
       .innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
       .where(eq(schema.member.weddingId, w.id)),
   ]);
-  const memberOpts: MemberOpt[] = members.map((m) => ({ id: m.id, name: m.name || m.email, role: m.role }));
+  const memberOpts: MemberOpt[] = members.map((m) => ({ id: m.id, name: m.name || m.email, role: roleName(m.role, ctx.roles) }));
   const memberName = new Map(memberOpts.map((m) => [m.id, m.name]));
 
   const pics = [...new Set(all.map((t) => t.pic).filter((x): x is string => Boolean(x)))].sort();
@@ -60,7 +62,7 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
         title={isPanitia ? "Tugas saya" : "Checklist"}
         description={`${doneCount} dari ${all.length} tugas selesai. Tenggat disusun mundur dari akad ${dateShort(w.akadDate)} dan ikut bergeser bila tanggal akad diubah.`}
         actions={
-          !isPanitia && (
+          edit && (
             <FormDialog
               title="Tambah tugas"
               action={addTask}
@@ -76,6 +78,8 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
           )
         }
       />
+
+      {ctx.perms.checklist === "view" && <ViewOnly what="checklist" />}
 
       {pics.length > 1 && (
         <nav aria-label="Filter PIC" className="flex flex-wrap gap-1 self-start rounded-xl bg-surface p-1">
@@ -102,7 +106,7 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
         <div className="rounded-[22px] bg-surface p-5">
           <p className="text-[14px] font-bold">{isPanitia ? "Belum ada tugas untukmu." : "Checklist masih kosong."}</p>
           <p className="text-[13px] text-muted">
-            {isPanitia ? "Tugas yang diberikan pasangan akan muncul di sini." : "Tambahkan tugas pertama beserta PIC dan tenggatnya."}
+            {isPanitia ? "Tugas yang diberikan pasangan akan muncul di sini." : edit ? "Tambahkan tugas pertama beserta PIC dan tenggatnya." : "Tugas akan muncul di sini setelah ditambahkan."}
           </p>
         </div>
       ) : (
@@ -124,7 +128,17 @@ export default async function ChecklistPage({ searchParams }: { searchParams: Pr
                 </div>
                 {col.items.length === 0 && <p className="text-[13px] text-muted">Tidak ada tugas di rentang ini.</p>}
                 {col.items.map((t) => (
-                  <TaskRow key={t.id} t={t} akad={w.akadDate} today={today} members={memberOpts} memberName={memberName} canEdit={!isPanitia} />
+                  <TaskRow
+                    key={t.id}
+                    t={t}
+                    akad={w.akadDate}
+                    today={today}
+                    members={memberOpts}
+                    memberName={memberName}
+                    canEdit={edit}
+                    // Tanpa akses ubah, tugas yang ditugaskan ke diri sendiri tetap bisa dicentang.
+                    canTick={edit || t.assigneeMemberId === ctx.member.id}
+                  />
                 ))}
               </section>
             );
@@ -142,6 +156,7 @@ function TaskRow({
   members,
   memberName,
   canEdit,
+  canTick,
 }: {
   t: Task;
   akad: string;
@@ -149,13 +164,14 @@ function TaskRow({
   members: MemberOpt[];
   memberName: Map<string, string>;
   canEdit: boolean;
+  canTick: boolean;
 }) {
   const due = addDays(akad, t.offsetDays);
   const overdue = !t.done && due < today;
   const who = [t.pic, t.assigneeMemberId ? memberName.get(t.assigneeMemberId) : null].filter(Boolean).join(", ");
   return (
     <div className="flex items-start gap-1 rounded-[14px] bg-sunken py-1 pl-1 pr-1">
-      <TaskCheck id={t.id} done={t.done} title={t.title} />
+      <TaskCheck id={t.id} done={t.done} title={t.title} readOnly={!canTick} />
       <div className="min-w-0 flex-1 py-2">
         <p className={cx("text-[14px] font-semibold leading-snug", t.done && "text-muted line-through")}>{t.title}</p>
         <p className="text-[12px] text-muted">
@@ -198,8 +214,8 @@ function TaskFields({ t, members, defaultDue }: { t?: Task; members: MemberOpt[]
           <DateField name="dueDate" defaultValue={defaultDue} />
         </Field>
       </div>
-      <Field label="Tugaskan ke anggota" hint="Panitia hanya melihat tugas yang ditugaskan kepadanya.">
-        <SelectField name="assigneeMemberId" defaultValue={t?.assigneeMemberId ?? ""} options={[{ value: "", label: "Tidak ditugaskan" }, ...members.map((m) => ({ value: m.id, label: <>{m.name} ({ROLE_LABEL[m.role as Role] ?? m.role})</> }))]} />
+      <Field label="Tugaskan ke anggota" hint="Anggota dengan akses Tugas sendiri hanya melihat tugas yang ditugaskan kepadanya.">
+        <SelectField name="assigneeMemberId" defaultValue={t?.assigneeMemberId ?? ""} options={[{ value: "", label: "Tidak ditugaskan" }, ...members.map((m) => ({ value: m.id, label: <>{m.name} ({m.role})</> }))]} />
       </Field>
     </>
   );

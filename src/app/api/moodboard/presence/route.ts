@@ -20,7 +20,7 @@ const body = z.object({
 export async function POST(req: Request) {
   const ctx = await getContext();
   if (!ctx) return new Response(null, { status: 401 });
-  if (!can(ctx.member.role, "moodboard")) return new Response(null, { status: 403 });
+  if (!can(ctx.perms, "moodboard")) return new Response(null, { status: 403 });
   const p = body.safeParse(await req.json().catch(() => null));
   if (!p.success) return new Response(null, { status: 400 });
   if (p.data.moving && Object.keys(p.data.moving).length > 300) return new Response(null, { status: 400 });

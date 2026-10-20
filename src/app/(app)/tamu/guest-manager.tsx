@@ -30,7 +30,7 @@ const PAGE_SIZES = [25, 50, 100];
 const deliveryName = (id: string) => DELIVERY.find((d) => d.id === id)?.name ?? id;
 const statusOf = (id: string) => GUEST_STATUS.find((s) => s.id === id) ?? GUEST_STATUS[0];
 
-export function GuestManager({ guests }: { guests: GuestRow[] }) {
+export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit: boolean }) {
   const [cat, setCat] = useState("Semua");
   const [side, setSide] = useState("");
   const [session, setSession] = useState("");
@@ -96,14 +96,18 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
   return (
     <section className="flex flex-col gap-4 rounded-[24px] bg-surface p-4 sm:p-5" aria-label="Daftar tamu">
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => setEditing("new")}>
-          <Plus size={16} aria-hidden="true" />
-          Tambah tamu
-        </Button>
-        <Button variant="ground" onClick={() => setImporting(true)}>
-          <FileSpreadsheet size={16} aria-hidden="true" />
-          Import Excel atau CSV
-        </Button>
+        {canEdit && (
+          <>
+            <Button onClick={() => setEditing("new")}>
+              <Plus size={16} aria-hidden="true" />
+              Tambah tamu
+            </Button>
+            <Button variant="ground" onClick={() => setImporting(true)}>
+              <FileSpreadsheet size={16} aria-hidden="true" />
+              Import Excel atau CSV
+            </Button>
+          </>
+        )}
         <label className="relative ml-auto flex min-w-[220px] flex-1 items-center sm:max-w-[320px]">
           <span className="sr-only">Cari tamu</span>
           <Search size={16} className="pointer-events-none absolute left-3.5 text-muted" aria-hidden="true" />
@@ -154,7 +158,7 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
             setStatus(v);
             setPage(1);
           }} className="h-10 w-auto!" options={[{ value: "", label: "Semua status" }, ...GUEST_STATUS.map((s) => ({ value: s.id, label: s.name }))]} />
-          {filtered.some((g) => g.status !== "terkirim") && (
+          {canEdit && filtered.some((g) => g.status !== "terkirim") && (
             <Button variant="ghost" size="sm" className="h-10" onClick={markSent} disabled={pending}>
               Tandai yang tampil sudah terkirim
             </Button>
@@ -166,7 +170,7 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
         <div className="rounded-[18px] bg-sunken p-5">
           <p className="text-[14px] font-bold">Belum ada tamu.</p>
           <p className="text-[13px] text-muted">
-            Tambahkan tamu satu per satu, atau import daftar dari Excel yang biasa dipegang orang tua.
+            {canEdit ? "Tambahkan tamu satu per satu, atau import daftar dari Excel yang biasa dipegang orang tua." : "Daftar tamu akan muncul di sini setelah ditambahkan pasangan atau keluarga."}
           </p>
         </div>
       ) : filtered.length === 0 ? (
@@ -186,9 +190,11 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
                       {h}
                     </th>
                   ))}
-                  <th scope="col" className="border-b border-line px-3 py-2.5">
-                    <span className="sr-only">Aksi</span>
-                  </th>
+                  {canEdit && (
+                    <th scope="col" className="border-b border-line px-3 py-2.5">
+                      <span className="sr-only">Aksi</span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -209,9 +215,11 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
                     <td className="px-3 py-2.5">
                       <Status tone={statusOf(g.status).tone}>{statusOf(g.status).name}</Status>
                     </td>
-                    <td className="px-1 py-1 text-right">
-                      <RowActions g={g} onEdit={() => setEditing(g)} />
-                    </td>
+                    {canEdit && (
+                      <td className="px-1 py-1 text-right">
+                        <RowActions g={g} onEdit={() => setEditing(g)} />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -238,7 +246,7 @@ export function GuestManager({ guests }: { guests: GuestRow[] }) {
                     <Status tone={statusOf(g.status).tone}>{statusOf(g.status).name}</Status>
                   </div>
                 </div>
-                <RowActions g={g} onEdit={() => setEditing(g)} />
+                {canEdit && <RowActions g={g} onEdit={() => setEditing(g)} />}
               </li>
             ))}
           </ul>

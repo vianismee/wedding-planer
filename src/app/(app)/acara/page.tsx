@@ -39,6 +39,7 @@ import {
   PageHeader,
   SectionTitle,
   Status,
+  ViewOnly,
   cx,
 } from "@/components/kit";
 import { DateField } from "@/components/date-field";
@@ -54,7 +55,7 @@ export default async function AcaraPage({
   searchParams: Promise<{ e?: string }>;
 }) {
   const ctx = await requirePage("acara");
-  const edit = can(ctx.member.role, "acara.edit");
+  const edit = can(ctx.perms, "acara", "edit");
   const { e: selectedId } = await searchParams;
   const today = todayISO();
 
@@ -81,8 +82,10 @@ export default async function AcaraPage({
         .orderBy(asc(schema.rundownItem.sortOrder))
     : [];
 
+  // Anggota dengan Checklist "Tugas sendiri" melihat tugasnya langsung di halaman acara.
+  const ownTasks = ctx.perms.checklist === "own";
   const myTasks =
-    ctx.member.role === "panitia"
+    ownTasks
       ? await db
           .select()
           .from(schema.task)
@@ -152,8 +155,9 @@ export default async function AcaraPage({
           )
         }
       />
+      {!edit && <ViewOnly what="acara dan rundown" />}
 
-      {ctx.member.role === "panitia" && (
+      {ownTasks && (
         <Card className="flex flex-col gap-3">
           <SectionTitle>Tugas saya</SectionTitle>
           {myTasks.length === 0 ? (
