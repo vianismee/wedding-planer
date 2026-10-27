@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { asc, desc, eq } from "drizzle-orm";
 import { Paperclip, Pencil, Plus, Trash2 } from "lucide-react";
 import { db, schema } from "@/db";
@@ -7,36 +8,40 @@ import { can } from "@/lib/roles";
 import { dateShort, dateShorter, dayMonth, diffDays, relativeDays, rupiah, rupiahShort, todayISO } from "@/lib/format";
 import {
   addCategory,
-  addDeposit,
   addExpense,
   addFunding,
   addGoal,
   deleteCategory,
-  deleteDeposit,
   deleteExpense,
   deleteFunding,
-  deleteGoal,
   payTerm,
   updateCategory,
   updateExpense,
   updateFunding,
-  updateGoal,
 } from "@/actions/budget";
-import { FREQ_LABEL, FREQUENCIES, PER_LABEL, planFor } from "@/lib/savings";
+import { balanceOf } from "@/lib/savings";
+import { GoalFields, SavingsTab, SIDE_LABEL } from "./savings-tab";
 import { ActionButton, FormDialog } from "@/components/forms";
 import { FileInput } from "@/components/file-input";
 import { Card, Empty, Field, Input, PageHeader, Progress, SectionTitle, Status, ViewOnly, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
-import type { BudgetCategory, Expense, FundingSource, SavingsGoal } from "@/db/schema";
+import type { BudgetCategory, Expense, FundingSource } from "@/db/schema";
 
 export const metadata: Metadata = { title: "Budget" };
 
 const FUND_COLORS = ["#1C1B29", "#B9B2EE", "#5E5D70", "#E7C3A9", "#9FC2A8", "#C9C8D6"];
-const SIDE_LABEL: Record<string, string> = { pengantin: "Pengantin", pria: "Keluarga pria", wanita: "Keluarga wanita", lainnya: "Lainnya" };
 
-export default async function BudgetPage() {
+// Tab mengikuti URL (?tab=), seperti Pengaturan, jadi setelah menyimpan halaman tetap di tab yang sama.
+const TABS = [
+  { id: "anggaran", name: "Anggaran" },
+  { id: "tabungan", name: "Tabungan" },
+];
+
+export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const ctx = await requirePage("budget");
+  const { tab } = await searchParams;
+  const active = TABS.find((t) => t.id === tab)?.id ?? TABS[0].id;
   const edit = can(ctx.perms, "budget", "edit");
   const wid = ctx.wedding.id;
   const today = todayISO();
@@ -72,7 +77,7 @@ export default async function BudgetPage() {
   const spent = expenses.reduce((s, e) => s + e.amount, 0);
   const bound = unpaid.reduce((s, t) => s + t.term.amount, 0);
   const fundTotal = funding.reduce((s, f) => s + f.amount, 0);
-  const savedTotal = deposits.reduce((s, d) => s + d.amount, 0);
+  const savedTotal = balanceOf(deposits);
   const goalTotal = goals.reduce((s, g) => s + g.target, 0);
   const highlight = unpaid[0]?.vendor.categoryId ?? null;
 
@@ -80,9 +85,23 @@ export default async function BudgetPage() {
     <>
       <PageHeader
         title="Budget"
-        description="Anggaran, pengeluaran, dan termin vendor dari dana pengantin dan kedua keluarga."
+        description="Anggaran, pengeluaran, termin vendor, dan tabungan pengantin serta kedua keluarga."
         actions={
-          edit && (
+          edit &&
+          (active === "tabungan" ? (
+            <FormDialog
+              title="Tambah tabungan"
+              action={addGoal}
+              trigger={
+                <>
+                  <Plus size={16} aria-hidden="true" />
+                  Tambah tabungan
+                </>
+              }
+            >
+              <GoalFields today={today} />
+            </FormDialog>
+          ) : (
             <>
               <FormDialog
                 variant="secondary"
@@ -110,395 +129,287 @@ export default async function BudgetPage() {
                 <ExpenseFields cats={cats} funding={funding} today={today} />
               </FormDialog>
             </>
-          )
+          ))
         }
       />
       {!edit && <ViewOnly what="budget" />}
 
-      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-        <Card tone="ink" className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-[#c9c8d6]">Total anggaran</span>
-          <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em]">{rupiahShort(total)}</span>
-          <span className="text-[12px] text-[#c9c8d6]">Dana tersedia {rupiahShort(fundTotal + savedTotal)}</span>
-          {goals.length > 0 && (
-            <span className="text-[12px] text-[#c9c8d6]">
-              Tabungan terkumpul {rupiahShort(savedTotal)} dari target {rupiahShort(goalTotal)}
-            </span>
-          )}
-        </Card>
-        <Card className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">Terpakai</span>
-          <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em]">{rupiahShort(spent)}</span>
-          <span className="text-[12px] text-muted">{total ? `${Math.round((spent / total) * 100)}% dari anggaran` : "Anggaran belum diisi"}</span>
-        </Card>
-        <Card className="flex flex-col gap-1.5">
-          <span className="text-[12px] text-muted">Sisa</span>
-          <span className={cx("text-[28px] font-extrabold leading-none tracking-[-0.02em]", total - spent < 0 && "text-warn-fg")}>
-            {rupiahShort(total - spent)}
-          </span>
-          <span className="text-[12px] text-muted">{rupiahShort(bound)} sudah terikat termin</span>
-        </Card>
-      </div>
+      <nav aria-label="Bagian budget" className="-mx-1 flex max-w-full gap-1 self-start overflow-x-auto rounded-xl bg-ground p-1">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            href={`/budget?tab=${t.id}`}
+            aria-current={t.id === active ? "page" : undefined}
+            className={cx(
+              "flex h-10 shrink-0 items-center rounded-[10px] px-3.5 text-[13px] font-bold no-underline transition-colors duration-150",
+              t.id === active ? "bg-ink text-white" : "text-ink hover:bg-surface",
+            )}
+          >
+            {t.name}
+          </Link>
+        ))}
+      </nav>
 
-      <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <Card className="flex flex-col gap-2" aria-labelledby="kat-title">
-            <SectionTitle id="kat-title">Per kategori</SectionTitle>
-            {cats.length === 0 ? (
-              <Empty title="Belum ada kategori budget.">{edit ? "Tambahkan kategori seperti Gedung atau Catering beserta alokasinya." : "Kategori akan muncul di sini setelah ditambahkan."}</Empty>
-            ) : (
-              <div className="relative overflow-x-auto">
-                <table className="w-full min-w-[560px] border-collapse text-[13px]">
-                  <thead>
-                    <tr className="text-left text-[12px] text-muted">
-                      <th scope="col" className="border-b border-line py-2.5 pr-3 font-semibold">Kategori</th>
-                      <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Anggaran</th>
-                      <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terpakai</th>
-                      <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terikat termin</th>
-                      <th scope="col" className="w-[28%] border-b border-line px-3 py-2.5 font-semibold">Progres</th>
-                      {edit && <th scope="col" className="border-b border-line py-2.5"><span className="sr-only">Aksi</span></th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cats.map((c) => {
-                      const s = spentBy.get(c.id) ?? 0;
-                      const over = c.allocation > 0 && s > c.allocation;
-                      return (
-                        <tr key={c.id} className="border-b border-ground last:border-0">
-                          <td className="py-2.5 pr-3 text-[14px] font-bold">{c.name}</td>
-                          <td className="px-3 py-2.5 text-muted">{rupiahShort(c.allocation)}</td>
-                          <td className={cx("px-3 py-2.5 font-bold", over && "text-warn-fg")}>{rupiahShort(s)}</td>
-                          <td className="px-3 py-2.5">{boundBy.get(c.id) ? rupiahShort(boundBy.get(c.id)!) : "Tidak ada"}</td>
-                          <td className="px-3 py-2.5">
-                            <Progress
-                              value={c.allocation ? (s / c.allocation) * 100 : s ? 100 : 0}
-                              tone={c.id === highlight ? "accent" : "ink"}
-                              label={`${c.name} terpakai`}
-                            />
-                            {over && <span className="mt-1 block text-[11px] font-bold text-warn-fg">Lewat {rupiahShort(s - c.allocation)}</span>}
-                          </td>
-                          {edit && (
-                            <td className="whitespace-nowrap py-1 text-right">
-                              <FormDialog
-                                variant="icon"
-                                triggerLabel={`Ubah ${c.name}`}
-                                title={`Ubah kategori ${c.name}`}
-                                action={updateCategory.bind(null, c.id)}
-                                trigger={<Pencil size={15} aria-hidden="true" />}
-                              >
-                                <CategoryFields c={c} />
-                              </FormDialog>
-                              <ActionButton
-                                variant="icon"
-                                label={`Hapus ${c.name}`}
-                                confirm={`Hapus kategori ${c.name}? Penawaran di kategori ini ikut terhapus. Pengeluaran tetap tersimpan tanpa kategori.`}
-                                action={deleteCategory.bind(null, c.id)}
-                              >
-                                <Trash2 size={15} aria-hidden="true" />
-                              </ActionButton>
-                            </td>
-                          )}
+      {active === "tabungan" ? (
+        <SavingsTab goals={goals} deposits={deposits} edit={edit} today={today} akadDate={ctx.wedding.akadDate} />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
+            <Card tone="ink" className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-[#c9c8d6]">Total anggaran</span>
+              <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em]">{rupiahShort(total)}</span>
+              <span className="text-[12px] text-[#c9c8d6]">Dana tersedia {rupiahShort(fundTotal + savedTotal)}</span>
+              {goals.length > 0 && (
+                <span className="text-[12px] text-[#c9c8d6]">
+                  Tabungan terkumpul {rupiahShort(savedTotal)} dari target {rupiahShort(goalTotal)}
+                </span>
+              )}
+            </Card>
+            <Card className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-muted">Terpakai</span>
+              <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em]">{rupiahShort(spent)}</span>
+              <span className="text-[12px] text-muted">{total ? `${Math.round((spent / total) * 100)}% dari anggaran` : "Anggaran belum diisi"}</span>
+            </Card>
+            <Card className="flex flex-col gap-1.5">
+              <span className="text-[12px] text-muted">Sisa</span>
+              <span className={cx("text-[28px] font-extrabold leading-none tracking-[-0.02em]", total - spent < 0 && "text-warn-fg")}>
+                {rupiahShort(total - spent)}
+              </span>
+              <span className="text-[12px] text-muted">{rupiahShort(bound)} sudah terikat termin</span>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="flex min-w-0 flex-col gap-6">
+              <Card className="flex flex-col gap-2" aria-labelledby="kat-title">
+                <SectionTitle id="kat-title">Per kategori</SectionTitle>
+                {cats.length === 0 ? (
+                  <Empty title="Belum ada kategori budget.">{edit ? "Tambahkan kategori seperti Gedung atau Catering beserta alokasinya." : "Kategori akan muncul di sini setelah ditambahkan."}</Empty>
+                ) : (
+                  <div className="relative overflow-x-auto">
+                    <table className="w-full min-w-[560px] border-collapse text-[13px]">
+                      <thead>
+                        <tr className="text-left text-[12px] text-muted">
+                          <th scope="col" className="border-b border-line py-2.5 pr-3 font-semibold">Kategori</th>
+                          <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Anggaran</th>
+                          <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terpakai</th>
+                          <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Terikat termin</th>
+                          <th scope="col" className="w-[28%] border-b border-line px-3 py-2.5 font-semibold">Progres</th>
+                          {edit && <th scope="col" className="border-b border-line py-2.5"><span className="sr-only">Aksi</span></th>}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {highlight && (
-              <p className="text-[12px] text-muted">Bar berwarna aksen menandai kategori dengan termin terdekat.</p>
-            )}
-          </Card>
+                      </thead>
+                      <tbody>
+                        {cats.map((c) => {
+                          const s = spentBy.get(c.id) ?? 0;
+                          const over = c.allocation > 0 && s > c.allocation;
+                          return (
+                            <tr key={c.id} className="border-b border-ground last:border-0">
+                              <td className="py-2.5 pr-3 text-[14px] font-bold">{c.name}</td>
+                              <td className="px-3 py-2.5 text-muted">{rupiahShort(c.allocation)}</td>
+                              <td className={cx("px-3 py-2.5 font-bold", over && "text-warn-fg")}>{rupiahShort(s)}</td>
+                              <td className="px-3 py-2.5">{boundBy.get(c.id) ? rupiahShort(boundBy.get(c.id)!) : "Tidak ada"}</td>
+                              <td className="px-3 py-2.5">
+                                <Progress
+                                  value={c.allocation ? (s / c.allocation) * 100 : s ? 100 : 0}
+                                  tone={c.id === highlight ? "accent" : "ink"}
+                                  label={`${c.name} terpakai`}
+                                />
+                                {over && <span className="mt-1 block text-[11px] font-bold text-warn-fg">Lewat {rupiahShort(s - c.allocation)}</span>}
+                              </td>
+                              {edit && (
+                                <td className="whitespace-nowrap py-1 text-right">
+                                  <FormDialog
+                                    variant="icon"
+                                    triggerLabel={`Ubah ${c.name}`}
+                                    title={`Ubah kategori ${c.name}`}
+                                    action={updateCategory.bind(null, c.id)}
+                                    trigger={<Pencil size={15} aria-hidden="true" />}
+                                  >
+                                    <CategoryFields c={c} />
+                                  </FormDialog>
+                                  <ActionButton
+                                    variant="icon"
+                                    label={`Hapus ${c.name}`}
+                                    confirm={`Hapus kategori ${c.name}? Penawaran di kategori ini ikut terhapus. Pengeluaran tetap tersimpan tanpa kategori.`}
+                                    action={deleteCategory.bind(null, c.id)}
+                                  >
+                                    <Trash2 size={15} aria-hidden="true" />
+                                  </ActionButton>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {highlight && (
+                  <p className="text-[12px] text-muted">Bar berwarna aksen menandai kategori dengan termin terdekat.</p>
+                )}
+              </Card>
 
-          <Card className="flex flex-col gap-2" aria-labelledby="exp-title">
-            <SectionTitle id="exp-title">Pengeluaran</SectionTitle>
-            {expenses.length === 0 ? (
-              <Empty title="Belum ada pengeluaran.">
-                {edit ? "Catat setiap pembayaran beserta foto buktinya, atau tandai termin vendor sebagai lunas." : "Pengeluaran akan muncul di sini setelah dicatat."}
-              </Empty>
-            ) : (
-              <ul className="flex flex-col">
-                {expenses.map((e) => (
-                  <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ground py-2.5 last:border-0">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-bold">{e.description}</div>
-                      <div className="text-[12px] text-muted">
-                        {dateShort(e.date)}
-                        {e.categoryId && catName.get(e.categoryId) ? `, ${catName.get(e.categoryId)}` : ""}
-                      </div>
-                    </div>
-                    {e.receiptFileId && (
-                      <a
-                        href={`/api/files/${e.receiptFileId}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="hit-44 inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold hover:bg-ground"
-                      >
-                        <Paperclip size={14} aria-hidden="true" />
-                        Bukti
-                      </a>
-                    )}
-                    <span className="text-[14px] font-extrabold tabular">{rupiah(e.amount)}</span>
-                    {edit && (
-                      <span className="flex">
-                        <FormDialog
-                          variant="icon"
-                          triggerLabel={`Ubah ${e.description}`}
-                          title="Ubah pengeluaran"
-                          action={updateExpense.bind(null, e.id)}
-                          trigger={<Pencil size={15} aria-hidden="true" />}
-                        >
-                          <ExpenseFields cats={cats} funding={funding} today={today} e={e} receiptName={e.receiptFileId ? fileName.get(e.receiptFileId) : undefined} />
-                        </FormDialog>
-                        <ActionButton
-                          variant="icon"
-                          label={`Hapus ${e.description}`}
-                          confirm={e.paymentTermId ? "Hapus pengeluaran ini? Termin terkait akan kembali berstatus belum dibayar." : "Hapus pengeluaran ini?"}
-                          action={deleteExpense.bind(null, e.id)}
-                        >
-                          <Trash2 size={15} aria-hidden="true" />
-                        </ActionButton>
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-5">
-          <Card className="flex flex-col gap-3.5" aria-labelledby="tabungan-title">
-            <SectionTitle
-              id="tabungan-title"
-              aside={
-                edit && (
-                  <FormDialog variant="icon" triggerLabel="Tambah tabungan" title="Tambah tabungan" action={addGoal} trigger={<Plus size={18} aria-hidden="true" />}>
-                    <GoalFields today={today} />
-                  </FormDialog>
-                )
-              }
-            >
-              Tabungan
-            </SectionTitle>
-            {goals.length === 0 ? (
-              <p className="text-[13px] text-muted">
-                Belum ada tabungan.{edit && " Catat target tiap pihak, misalnya pihak pria Rp 25 jt, lalu catat setorannya."}
-              </p>
-            ) : (
-              <ul className="flex flex-col">
-                {goals.map((g) => {
-                  const list = deposits.filter((d) => d.goalId === g.id);
-                  const p = planFor(g, list.reduce((s, d) => s + d.amount, 0), today, ctx.wedding.akadDate);
-                  const per = PER_LABEL[p.frequency];
-                  return (
-                    <li key={g.id} className="flex flex-col gap-2 border-b border-ground py-3 first:pt-0 last:border-0 last:pb-0">
-                      <div className="flex items-start gap-2">
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[14px] font-bold">{g.name}</span>
-                          <span className="block text-[11px] text-muted">{SIDE_LABEL[g.side]}</span>
-                        </span>
-                        <span className="text-right text-[13px]">
-                          <span className="block font-bold">{rupiahShort(p.saved)}</span>
-                          <span className="block text-[11px] text-muted">dari {rupiahShort(g.target)}</span>
-                        </span>
-                        {edit && (
-                          <FormDialog
-                            variant="icon"
-                            triggerLabel={`Ubah ${g.name}`}
-                            title="Ubah tabungan"
-                            action={updateGoal.bind(null, g.id)}
-                            trigger={<Pencil size={14} aria-hidden="true" />}
-                            footer={
-                              <ActionButton
-                                variant="danger"
-                                action={deleteGoal.bind(null, g.id)}
-                                confirm={`Hapus tabungan ${g.name}? Semua setorannya ikut terhapus.`}
-                                className="mr-auto"
-                              >
-                                Hapus
-                              </ActionButton>
-                            }
+              <Card className="flex flex-col gap-2" aria-labelledby="exp-title">
+                <SectionTitle id="exp-title">Pengeluaran</SectionTitle>
+                {expenses.length === 0 ? (
+                  <Empty title="Belum ada pengeluaran.">
+                    {edit ? "Catat setiap pembayaran beserta foto buktinya, atau tandai termin vendor sebagai lunas." : "Pengeluaran akan muncul di sini setelah dicatat."}
+                  </Empty>
+                ) : (
+                  <ul className="flex flex-col">
+                    {expenses.map((e) => (
+                      <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ground py-2.5 last:border-0">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[14px] font-bold">{e.description}</div>
+                          <div className="text-[12px] text-muted">
+                            {dateShort(e.date)}
+                            {e.categoryId && catName.get(e.categoryId) ? `, ${catName.get(e.categoryId)}` : ""}
+                          </div>
+                        </div>
+                        {e.receiptFileId && (
+                          <a
+                            href={`/api/files/${e.receiptFileId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="hit-44 inline-flex h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold hover:bg-ground"
                           >
-                            <GoalFields g={g} today={today} />
-                          </FormDialog>
+                            <Paperclip size={14} aria-hidden="true" />
+                            Bukti
+                          </a>
                         )}
-                      </div>
-                      <Progress value={g.target ? (p.saved / g.target) * 100 : 0} label={`${g.name} terkumpul`} />
-                      <p className="text-[12px] text-muted">
-                        {p.status === "tercapai"
-                          ? "Target sudah tercapai."
-                          : p.status === "lewat"
-                            ? `Lewat tanggal target ${dateShort(p.due)}, kurang ${rupiahShort(p.remaining)}.`
-                            : `Rencana ${rupiahShort(p.perPeriod)} ${per} sampai ${dateShort(p.due)}. Perlu ${rupiahShort(p.neededNow)} ${per} mulai sekarang.`}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {p.status === "tercapai" && <Status tone="ok">Tercapai</Status>}
-                        {p.status === "sesuai" && <Status tone="ok">Sesuai rencana</Status>}
-                        {p.status === "tertinggal" && <Status tone="warn">Tertinggal {rupiahShort(p.expected - p.saved)}</Status>}
-                        {p.status === "lewat" && <Status tone="warn">Belum tercapai</Status>}
+                        <span className="text-[14px] font-extrabold tabular">{rupiah(e.amount)}</span>
+                        {edit && (
+                          <span className="flex">
+                            <FormDialog
+                              variant="icon"
+                              triggerLabel={`Ubah ${e.description}`}
+                              title="Ubah pengeluaran"
+                              action={updateExpense.bind(null, e.id)}
+                              trigger={<Pencil size={15} aria-hidden="true" />}
+                            >
+                              <ExpenseFields cats={cats} funding={funding} today={today} e={e} receiptName={e.receiptFileId ? fileName.get(e.receiptFileId) : undefined} />
+                            </FormDialog>
+                            <ActionButton
+                              variant="icon"
+                              label={`Hapus ${e.description}`}
+                              confirm={e.paymentTermId ? "Hapus pengeluaran ini? Termin terkait akan kembali berstatus belum dibayar." : "Hapus pengeluaran ini?"}
+                              action={deleteExpense.bind(null, e.id)}
+                            >
+                              <Trash2 size={15} aria-hidden="true" />
+                            </ActionButton>
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-5">
+              <Card className="flex flex-col gap-3.5" aria-labelledby="dana-title">
+                <SectionTitle
+                  id="dana-title"
+                  aside={
+                    edit && (
+                      <FormDialog variant="icon" triggerLabel="Tambah sumber dana" title="Tambah sumber dana" action={addFunding} trigger={<Plus size={18} aria-hidden="true" />}>
+                        <FundingFields />
+                      </FormDialog>
+                    )
+                  }
+                >
+                  Sumber dana
+                </SectionTitle>
+                {funding.length === 0 ? (
+                  <p className="text-[13px] text-muted">Belum ada sumber dana.{edit && " Catat tabungan pengantin dan kontribusi tiap keluarga."}</p>
+                ) : (
+                  <>
+                    <div className="flex h-3.5 gap-[3px] overflow-hidden rounded-full" aria-hidden="true">
+                      {funding.map((f, i) => (
+                        <div key={f.id} style={{ width: `${fundTotal ? (f.amount / fundTotal) * 100 : 0}%`, background: FUND_COLORS[i % FUND_COLORS.length] }} />
+                      ))}
+                    </div>
+                    <ul className="flex flex-col gap-1 text-[13px]">
+                      {funding.map((f, i) => (
+                        <li key={f.id} className="flex items-center gap-2.5">
+                          <span className="size-2.5 shrink-0 rounded-full" style={{ background: FUND_COLORS[i % FUND_COLORS.length] }} aria-hidden="true" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{f.name}</span>
+                            <span className="block text-[11px] text-muted">{SIDE_LABEL[f.side]}</span>
+                          </span>
+                          <span className="font-bold">{rupiahShort(f.amount)}</span>
+                          {edit && (
+                            <FormDialog
+                              variant="icon"
+                              triggerLabel={`Ubah ${f.name}`}
+                              title="Ubah sumber dana"
+                              action={updateFunding.bind(null, f.id)}
+                              trigger={<Pencil size={14} aria-hidden="true" />}
+                              footer={
+                                <ActionButton variant="danger" action={deleteFunding.bind(null, f.id)} confirm={`Hapus sumber dana ${f.name}?`} className="mr-auto">
+                                  Hapus
+                                </ActionButton>
+                              }
+                            >
+                              <FundingFields f={f} />
+                            </FormDialog>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Card>
+
+              <section className="flex flex-col gap-2.5" aria-labelledby="termin-title">
+                <SectionTitle id="termin-title">Termin berikutnya</SectionTitle>
+                {unpaid.length === 0 ? (
+                  <Empty title="Tidak ada termin yang menunggu.">Termin muncul saat kamu memilih penawaran vendor atau menambah termin di halaman Vendor.</Empty>
+                ) : (
+                  unpaid.map(({ term, vendor }) => {
+                    const dm = dayMonth(term.dueDate);
+                    const d = diffDays(today, term.dueDate);
+                    return (
+                      <div key={term.id} className="flex items-center gap-3 rounded-[18px] bg-surface px-3.5 py-3">
+                        <div className="w-[46px] shrink-0 text-center">
+                          <div className="text-[18px] font-extrabold leading-none">{dm.day}</div>
+                          <div className="text-[11px] font-semibold text-muted">{dm.month}</div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] font-bold">
+                            {term.label} {vendor.name}
+                          </div>
+                          <div className="text-[12px] text-muted">{rupiah(term.amount)}</div>
+                          <Status tone={d <= 7 ? "warn" : "neutral"} className="mt-1">
+                            {relativeDays(term.dueDate, today)}
+                          </Status>
+                        </div>
                         {edit && (
                           <FormDialog
                             variant="ground"
                             size="sm"
-                            triggerClassName="ml-auto"
-                            title={`Setor ke ${g.name}`}
-                            description={p.remaining ? `Sisa target ${rupiah(p.remaining)}.` : undefined}
-                            action={addDeposit.bind(null, g.id)}
-                            submitLabel="Catat setoran"
-                            trigger={
-                              <>
-                                <Plus size={14} aria-hidden="true" />
-                                Setor
-                              </>
-                            }
+                            title={`Tandai lunas: ${term.label} ${vendor.name}`}
+                            description={`${rupiah(term.amount)}, jatuh tempo ${dateShorter(term.dueDate)}. Pembayaran dicatat sebagai pengeluaran.`}
+                            action={payTerm.bind(null, term.id)}
+                            submitLabel="Tandai lunas"
+                            trigger="Lunas"
                           >
-                            <Field label="Nominal" hint="Boleh ditulis 500000, 500.000, atau 500rb.">
-                              <Input name="amount" inputMode="numeric" required defaultValue={p.neededNow ? String(p.neededNow) : ""} />
-                            </Field>
-                            <Field label="Tanggal">
+                            <Field label="Tanggal bayar">
                               <DateField name="date" defaultValue={today} />
                             </Field>
-                            <Field label="Catatan (opsional)">
-                              <Input name="note" maxLength={160} placeholder="Contoh: gaji Maret" />
-                            </Field>
+                            <FundingSelect funding={funding} />
+                            <FileInput name="receiptFileId" kind="receipt" label="Bukti bayar (opsional)" />
                           </FormDialog>
                         )}
                       </div>
-                      {list.length > 0 && (
-                        <details className="text-[13px]">
-                          <summary className="cursor-pointer text-[12px] font-semibold text-muted">Riwayat setoran ({list.length})</summary>
-                          <ul className="mt-1.5 flex flex-col">
-                            {list.map((d) => (
-                              <li key={d.id} className="flex items-center gap-2 border-b border-ground py-1.5 last:border-0">
-                                <span className="min-w-0 flex-1">
-                                  <span className="block">{dateShort(d.date)}</span>
-                                  {d.note && <span className="block truncate text-[11px] text-muted">{d.note}</span>}
-                                </span>
-                                <span className="font-bold tabular">{rupiah(d.amount)}</span>
-                                {edit && (
-                                  <ActionButton
-                                    variant="icon"
-                                    label={`Hapus setoran ${dateShort(d.date)}`}
-                                    confirm={`Hapus setoran ${rupiah(d.amount)} tanggal ${dateShort(d.date)}?`}
-                                    action={deleteDeposit.bind(null, d.id)}
-                                  >
-                                    <Trash2 size={14} aria-hidden="true" />
-                                  </ActionButton>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
-
-          <Card className="flex flex-col gap-3.5" aria-labelledby="dana-title">
-            <SectionTitle
-              id="dana-title"
-              aside={
-                edit && (
-                  <FormDialog variant="icon" triggerLabel="Tambah sumber dana" title="Tambah sumber dana" action={addFunding} trigger={<Plus size={18} aria-hidden="true" />}>
-                    <FundingFields />
-                  </FormDialog>
-                )
-              }
-            >
-              Sumber dana
-            </SectionTitle>
-            {funding.length === 0 ? (
-              <p className="text-[13px] text-muted">Belum ada sumber dana.{edit && " Catat tabungan pengantin dan kontribusi tiap keluarga."}</p>
-            ) : (
-              <>
-                <div className="flex h-3.5 gap-[3px] overflow-hidden rounded-full" aria-hidden="true">
-                  {funding.map((f, i) => (
-                    <div key={f.id} style={{ width: `${fundTotal ? (f.amount / fundTotal) * 100 : 0}%`, background: FUND_COLORS[i % FUND_COLORS.length] }} />
-                  ))}
-                </div>
-                <ul className="flex flex-col gap-1 text-[13px]">
-                  {funding.map((f, i) => (
-                    <li key={f.id} className="flex items-center gap-2.5">
-                      <span className="size-2.5 shrink-0 rounded-full" style={{ background: FUND_COLORS[i % FUND_COLORS.length] }} aria-hidden="true" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">{f.name}</span>
-                        <span className="block text-[11px] text-muted">{SIDE_LABEL[f.side]}</span>
-                      </span>
-                      <span className="font-bold">{rupiahShort(f.amount)}</span>
-                      {edit && (
-                        <FormDialog
-                          variant="icon"
-                          triggerLabel={`Ubah ${f.name}`}
-                          title="Ubah sumber dana"
-                          action={updateFunding.bind(null, f.id)}
-                          trigger={<Pencil size={14} aria-hidden="true" />}
-                          footer={
-                            <ActionButton variant="danger" action={deleteFunding.bind(null, f.id)} confirm={`Hapus sumber dana ${f.name}?`} className="mr-auto">
-                              Hapus
-                            </ActionButton>
-                          }
-                        >
-                          <FundingFields f={f} />
-                        </FormDialog>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </Card>
-
-          <section className="flex flex-col gap-2.5" aria-labelledby="termin-title">
-            <SectionTitle id="termin-title">Termin berikutnya</SectionTitle>
-            {unpaid.length === 0 ? (
-              <Empty title="Tidak ada termin yang menunggu.">Termin muncul saat kamu memilih penawaran vendor atau menambah termin di halaman Vendor.</Empty>
-            ) : (
-              unpaid.map(({ term, vendor }) => {
-                const dm = dayMonth(term.dueDate);
-                const d = diffDays(today, term.dueDate);
-                return (
-                  <div key={term.id} className="flex items-center gap-3 rounded-[18px] bg-surface px-3.5 py-3">
-                    <div className="w-[46px] shrink-0 text-center">
-                      <div className="text-[18px] font-extrabold leading-none">{dm.day}</div>
-                      <div className="text-[11px] font-semibold text-muted">{dm.month}</div>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-bold">
-                        {term.label} {vendor.name}
-                      </div>
-                      <div className="text-[12px] text-muted">{rupiah(term.amount)}</div>
-                      <Status tone={d <= 7 ? "warn" : "neutral"} className="mt-1">
-                        {relativeDays(term.dueDate, today)}
-                      </Status>
-                    </div>
-                    {edit && (
-                      <FormDialog
-                        variant="ground"
-                        size="sm"
-                        title={`Tandai lunas: ${term.label} ${vendor.name}`}
-                        description={`${rupiah(term.amount)}, jatuh tempo ${dateShorter(term.dueDate)}. Pembayaran dicatat sebagai pengeluaran.`}
-                        action={payTerm.bind(null, term.id)}
-                        submitLabel="Tandai lunas"
-                        trigger="Lunas"
-                      >
-                        <Field label="Tanggal bayar">
-                          <DateField name="date" defaultValue={today} />
-                        </Field>
-                        <FundingSelect funding={funding} />
-                        <FileInput name="receiptFileId" kind="receipt" label="Bukti bayar (opsional)" />
-                      </FormDialog>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </section>
-        </div>
-      </div>
+                    );
+                  })
+                )}
+              </section>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -530,31 +441,6 @@ function FundingFields({ f }: { f?: FundingSource }) {
       </Field>
       <Field label="Nominal">
         <Input name="amount" inputMode="numeric" required defaultValue={f ? String(f.amount) : ""} />
-      </Field>
-    </>
-  );
-}
-
-function GoalFields({ g, today }: { g?: SavingsGoal; today: string }) {
-  return (
-    <>
-      <Field label="Nama tabungan">
-        <Input name="name" required defaultValue={g?.name} placeholder="Contoh: Tabungan pihak pria" />
-      </Field>
-      <Field label="Pihak">
-        <SelectField name="side" defaultValue={g?.side ?? "pengantin"} options={Object.entries(SIDE_LABEL).map(([id, n]) => ({ value: id, label: n }))} />
-      </Field>
-      <Field label="Target" hint="Boleh ditulis 25000000, 25.000.000, atau 25jt.">
-        <Input name="target" inputMode="numeric" required defaultValue={g ? String(g.target) : ""} />
-      </Field>
-      <Field label="Rencana setoran" hint="Nominal per periode dihitung otomatis dari target dan tanggalnya.">
-        <SelectField name="frequency" defaultValue={g?.frequency ?? "bulanan"} options={FREQUENCIES.map((f) => ({ value: f, label: FREQ_LABEL[f] }))} />
-      </Field>
-      <Field label="Mulai menabung">
-        <DateField name="startDate" defaultValue={g?.startDate ?? today} />
-      </Field>
-      <Field label="Target tercapai pada" hint="Kosongkan untuk memakai tanggal akad.">
-        <DateField name="dueDate" defaultValue={g?.dueDate ?? undefined} clearable placeholder="Tanggal akad" />
       </Field>
     </>
   );

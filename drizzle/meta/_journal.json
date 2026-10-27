@@ -120,6 +120,13 @@
       "when": 1793095965270,
       "tag": "0016_savings",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793096931141,
+      "tag": "0017_savings_kind",
+      "breakpoints": true
     }
   ]
 }

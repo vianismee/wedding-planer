@@ -270,6 +270,7 @@ export const savingsDeposit = pgTable(
     goalId: text("goal_id")
       .notNull()
       .references(() => savingsGoal.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("masuk"), // masuk (setoran) | keluar (penarikan)
     amount: money("amount"),
     date: date("date", { mode: "string" }).notNull(),
     note: text("note"),

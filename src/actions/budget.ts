@@ -6,7 +6,8 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireAction } from "@/lib/session";
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
-import { parseRupiah, todayISO } from "@/lib/format";
+import { parseRupiah, rupiah, todayISO } from "@/lib/format";
+import { balanceOf } from "@/lib/savings";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Isi tanggal.");
 const amount = z.number().int().min(0).max(100_000_000_000);
@@ -158,26 +159,70 @@ export async function deleteGoal(id: string): Promise<ActionResult> {
 }
 
 const depositSchema = z.object({
-  amount: amount.min(1, "Isi nominal setoran."),
+  kind: z.enum(["masuk", "keluar"]),
+  amount: amount.min(1, "Isi nominal."),
   date: isoDate,
   note: z.string().max(160).nullable(),
 });
+
+const parseDeposit = (fd: FormData) =>
+  depositSchema.parse({
+    kind: str(fd, "kind") || "masuk",
+    amount: parseRupiah(str(fd, "amount")),
+    date: str(fd, "date") || todayISO(),
+    note: optStr(fd, "note"),
+  });
+
+/**
+ * Saldo tabungan tidak boleh minus setelah perubahan. `skipId` = transaksi yang diubah atau dihapus,
+ * `next` = isi barunya (kosong saat menghapus).
+ */
+async function assertBalance(goalId: string, next: { kind: string; amount: number } | null, skipId?: string) {
+  const rows = (await db.select().from(schema.savingsDeposit).where(eq(schema.savingsDeposit.goalId, goalId))).filter((r) => r.id !== skipId);
+  const balance = balanceOf(rows);
+  if (balanceOf(next ? [...rows, next] : rows) >= 0) return;
+  throw new UserError(
+    next?.kind === "keluar"
+      ? `Saldo tabungan hanya ${rupiah(balance)}. Penarikan tidak bisa lebih dari saldo.`
+      : "Saldo tabungan akan minus karena sudah ada penarikan. Hapus atau kurangi penarikannya dulu.",
+  );
+}
 
 export async function addDeposit(goalId: string, fd: FormData): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("budget");
     const g = await ownGoal(ctx.wedding.id, goalId);
-    const data = depositSchema.parse({ amount: parseRupiah(str(fd, "amount")), date: str(fd, "date") || todayISO(), note: optStr(fd, "note") });
+    const data = parseDeposit(fd);
+    await assertBalance(g.id, data);
     await db.insert(schema.savingsDeposit).values({ ...data, goalId: g.id, weddingId: ctx.wedding.id });
     done();
-    return `Setoran ${g.name} tercatat.`;
+    return data.kind === "keluar" ? `Penarikan dari ${g.name} tercatat.` : `Setoran ${g.name} tercatat.`;
   });
+}
+
+export async function updateDeposit(id: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    const d = await ownDeposit(ctx.wedding.id, id);
+    const data = parseDeposit(fd);
+    await assertBalance(d.goalId, data, d.id);
+    await db.update(schema.savingsDeposit).set(data).where(eq(schema.savingsDeposit.id, d.id));
+    done();
+  });
+}
+
+async function ownDeposit(weddingId: string, id: string) {
+  const [d] = await db.select().from(schema.savingsDeposit).where(and(eq(schema.savingsDeposit.id, id), eq(schema.savingsDeposit.weddingId, weddingId)));
+  if (!d) throw new UserError("Transaksi tidak ditemukan.");
+  return d;
 }
 
 export async function deleteDeposit(id: string): Promise<ActionResult> {
   return run(async () => {
     const ctx = await requireAction("budget");
-    await db.delete(schema.savingsDeposit).where(and(eq(schema.savingsDeposit.id, id), eq(schema.savingsDeposit.weddingId, ctx.wedding.id)));
+    const d = await ownDeposit(ctx.wedding.id, id);
+    await assertBalance(d.goalId, null, d.id);
+    await db.delete(schema.savingsDeposit).where(eq(schema.savingsDeposit.id, d.id));
     done();
   });
 }

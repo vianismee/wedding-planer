@@ -1,0 +1,1 @@
+ALTER TABLE "savings_deposit" ADD COLUMN "kind" text DEFAULT 'masuk' NOT NULL;
