@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { addDeposit, deleteDeposit, deleteGoal, updateDeposit, updateGoal } from "@/actions/budget";
 import { ActionButton, FormDialog } from "@/components/forms";
@@ -20,12 +21,15 @@ export function SavingsTab({
   edit,
   today,
   akadDate,
+  selected,
 }: {
   goals: SavingsGoal[];
   deposits: SavingsDeposit[];
   edit: boolean;
   today: string;
   akadDate: string;
+  /** Id tabungan dari ?g=. Kosong atau tidak dikenal berarti tabungan pertama. */
+  selected?: string;
 }) {
   if (goals.length === 0)
     return (
@@ -38,6 +42,7 @@ export function SavingsTab({
 
   const saved = balanceOf(deposits);
   const target = goals.reduce((s, g) => s + g.target, 0);
+  const current = goals.find((g) => g.id === selected) ?? goals[0];
 
   return (
     <div className="flex flex-col gap-6">
@@ -59,9 +64,41 @@ export function SavingsTab({
         </Card>
       </div>
 
-      {goals.map((g) => (
-        <GoalCard key={g.id} g={g} rows={deposits.filter((d) => d.goalId === g.id).sort(byTime)} edit={edit} today={today} akadDate={akadDate} />
-      ))}
+      {/* Satu tabungan tampil sekaligus; pilihannya ikut URL supaya tetap terpilih setelah menyimpan. */}
+      {goals.length > 1 && (
+        <nav aria-label="Pilih tabungan" className="-mx-1 flex max-w-full gap-2 overflow-x-auto px-1 pb-1">
+          {goals.map((g) => {
+            const bal = balanceOf(deposits.filter((d) => d.goalId === g.id));
+            const on = g.id === current.id;
+            return (
+              <Link
+                key={g.id}
+                href={`/budget?tab=tabungan&g=${g.id}`}
+                scroll={false}
+                aria-current={on ? "page" : undefined}
+                className={cx(
+                  "flex min-w-[168px] shrink-0 flex-col gap-1.5 rounded-xl border px-3.5 py-2.5 no-underline transition-colors duration-150",
+                  on ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink hover:border-ink",
+                )}
+              >
+                <span className="truncate text-[13px] font-bold">{g.name}</span>
+                <span className={cx("text-[11px]", on ? "text-[#c9c8d6]" : "text-muted")}>
+                  {SIDE_LABEL[g.side]} · <span className="tabular">{rupiahShort(bal)}</span> / <span className="tabular">{rupiahShort(g.target)}</span>
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+      )}
+
+      <GoalCard
+        key={current.id}
+        g={current}
+        rows={deposits.filter((d) => d.goalId === current.id).sort(byTime)}
+        edit={edit}
+        today={today}
+        akadDate={akadDate}
+      />
     </div>
   );
 }

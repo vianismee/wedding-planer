@@ -38,9 +38,9 @@ const TABS = [
   { id: "tabungan", name: "Tabungan" },
 ];
 
-export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function BudgetPage({ searchParams }: { searchParams: Promise<{ tab?: string; g?: string }> }) {
   const ctx = await requirePage("budget");
-  const { tab } = await searchParams;
+  const { tab, g } = await searchParams;
   const active = TABS.find((t) => t.id === tab)?.id ?? TABS[0].id;
   const edit = can(ctx.perms, "budget", "edit");
   const wid = ctx.wedding.id;
@@ -151,7 +151,7 @@ export default async function BudgetPage({ searchParams }: { searchParams: Promi
       </nav>
 
       {active === "tabungan" ? (
-        <SavingsTab goals={goals} deposits={deposits} edit={edit} today={today} akadDate={ctx.wedding.akadDate} />
+        <SavingsTab goals={goals} deposits={deposits} edit={edit} today={today} akadDate={ctx.wedding.akadDate} selected={g} />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
