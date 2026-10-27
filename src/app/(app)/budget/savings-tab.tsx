@@ -83,7 +83,7 @@ export function SavingsTab({
               >
                 <span className="truncate text-[13px] font-bold">{g.name}</span>
                 <span className={cx("text-[11px]", on ? "text-[#c9c8d6]" : "text-muted")}>
-                  {SIDE_LABEL[g.side]} · <span className="tabular">{rupiahShort(bal)}</span> / <span className="tabular">{rupiahShort(g.target)}</span>
+                  {SIDE_LABEL[g.side]} Â· <span className="tabular">{rupiahShort(bal)}</span> / <span className="tabular">{rupiahShort(g.target)}</span>
                 </span>
               </Link>
             );
