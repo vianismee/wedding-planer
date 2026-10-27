@@ -245,6 +245,39 @@ export const fundingSource = pgTable(
   (t) => [index("funding_wedding_idx").on(t.weddingId)],
 );
 
+// Target tabungan per pihak beserta rencana setorannya. Setoran aktual di tabel savings_deposit.
+export const savingsGoal = pgTable(
+  "savings_goal",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    name: text("name").notNull(),
+    side: text("side").notNull().default("pengantin"), // pengantin | pria | wanita | lainnya
+    target: money("target"),
+    frequency: text("frequency").notNull().default("bulanan"), // harian | mingguan | bulanan
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    dueDate: date("due_date", { mode: "string" }), // kosong = tanggal akad
+    createdAt: createdAt(),
+  },
+  (t) => [index("savings_goal_wedding_idx").on(t.weddingId)],
+);
+
+export const savingsDeposit = pgTable(
+  "savings_deposit",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => savingsGoal.id, { onDelete: "cascade" }),
+    amount: money("amount"),
+    date: date("date", { mode: "string" }).notNull(),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("savings_deposit_goal_idx").on(t.goalId)],
+);
+
 export const file = pgTable(
   "file",
   {
@@ -570,6 +603,8 @@ export type RundownItem = typeof rundownItem.$inferSelect;
 export type Guest = typeof guest.$inferSelect;
 export type BudgetCategory = typeof budgetCategory.$inferSelect;
 export type FundingSource = typeof fundingSource.$inferSelect;
+export type SavingsGoal = typeof savingsGoal.$inferSelect;
+export type SavingsDeposit = typeof savingsDeposit.$inferSelect;
 export type Expense = typeof expense.$inferSelect;
 export type Offer = typeof offer.$inferSelect;
 export type Prospect = typeof prospect.$inferSelect;

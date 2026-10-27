@@ -7,22 +7,28 @@ import { can } from "@/lib/roles";
 import { dateShort, dateShorter, dayMonth, diffDays, relativeDays, rupiah, rupiahShort, todayISO } from "@/lib/format";
 import {
   addCategory,
+  addDeposit,
   addExpense,
   addFunding,
+  addGoal,
   deleteCategory,
+  deleteDeposit,
   deleteExpense,
   deleteFunding,
+  deleteGoal,
   payTerm,
   updateCategory,
   updateExpense,
   updateFunding,
+  updateGoal,
 } from "@/actions/budget";
+import { FREQ_LABEL, FREQUENCIES, PER_LABEL, planFor } from "@/lib/savings";
 import { ActionButton, FormDialog } from "@/components/forms";
 import { FileInput } from "@/components/file-input";
 import { Card, Empty, Field, Input, PageHeader, Progress, SectionTitle, Status, ViewOnly, cx } from "@/components/kit";
 import { DateField } from "@/components/date-field";
 import { SelectField } from "@/components/select-field";
-import type { BudgetCategory, Expense, FundingSource } from "@/db/schema";
+import type { BudgetCategory, Expense, FundingSource, SavingsGoal } from "@/db/schema";
 
 export const metadata: Metadata = { title: "Budget" };
 
@@ -35,7 +41,7 @@ export default async function BudgetPage() {
   const wid = ctx.wedding.id;
   const today = todayISO();
 
-  const [cats, funding, expenses, terms, files] = await Promise.all([
+  const [cats, funding, expenses, terms, files, goals, deposits] = await Promise.all([
     db.select().from(schema.budgetCategory).where(eq(schema.budgetCategory.weddingId, wid)).orderBy(asc(schema.budgetCategory.sortOrder), asc(schema.budgetCategory.name)),
     db.select().from(schema.fundingSource).where(eq(schema.fundingSource.weddingId, wid)),
     db.select().from(schema.expense).where(eq(schema.expense.weddingId, wid)).orderBy(desc(schema.expense.date), desc(schema.expense.createdAt)),
@@ -46,6 +52,12 @@ export default async function BudgetPage() {
       .where(eq(schema.paymentTerm.weddingId, wid))
       .orderBy(asc(schema.paymentTerm.dueDate)),
     db.select({ id: schema.file.id, name: schema.file.name }).from(schema.file).where(eq(schema.file.weddingId, wid)),
+    db.select().from(schema.savingsGoal).where(eq(schema.savingsGoal.weddingId, wid)).orderBy(asc(schema.savingsGoal.createdAt)),
+    db
+      .select()
+      .from(schema.savingsDeposit)
+      .where(eq(schema.savingsDeposit.weddingId, wid))
+      .orderBy(desc(schema.savingsDeposit.date), desc(schema.savingsDeposit.createdAt)),
   ]);
 
   const fileName = new Map(files.map((f) => [f.id, f.name]));
@@ -60,6 +72,8 @@ export default async function BudgetPage() {
   const spent = expenses.reduce((s, e) => s + e.amount, 0);
   const bound = unpaid.reduce((s, t) => s + t.term.amount, 0);
   const fundTotal = funding.reduce((s, f) => s + f.amount, 0);
+  const savedTotal = deposits.reduce((s, d) => s + d.amount, 0);
+  const goalTotal = goals.reduce((s, g) => s + g.target, 0);
   const highlight = unpaid[0]?.vendor.categoryId ?? null;
 
   return (
@@ -105,7 +119,12 @@ export default async function BudgetPage() {
         <Card tone="ink" className="flex flex-col gap-1.5">
           <span className="text-[12px] text-[#c9c8d6]">Total anggaran</span>
           <span className="text-[28px] font-extrabold leading-none tracking-[-0.02em]">{rupiahShort(total)}</span>
-          <span className="text-[12px] text-[#c9c8d6]">Dana tersedia {rupiahShort(fundTotal)}</span>
+          <span className="text-[12px] text-[#c9c8d6]">Dana tersedia {rupiahShort(fundTotal + savedTotal)}</span>
+          {goals.length > 0 && (
+            <span className="text-[12px] text-[#c9c8d6]">
+              Tabungan terkumpul {rupiahShort(savedTotal)} dari target {rupiahShort(goalTotal)}
+            </span>
+          )}
         </Card>
         <Card className="flex flex-col gap-1.5">
           <span className="text-[12px] text-muted">Terpakai</span>
@@ -249,6 +268,136 @@ export default async function BudgetPage() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-5">
+          <Card className="flex flex-col gap-3.5" aria-labelledby="tabungan-title">
+            <SectionTitle
+              id="tabungan-title"
+              aside={
+                edit && (
+                  <FormDialog variant="icon" triggerLabel="Tambah tabungan" title="Tambah tabungan" action={addGoal} trigger={<Plus size={18} aria-hidden="true" />}>
+                    <GoalFields today={today} />
+                  </FormDialog>
+                )
+              }
+            >
+              Tabungan
+            </SectionTitle>
+            {goals.length === 0 ? (
+              <p className="text-[13px] text-muted">
+                Belum ada tabungan.{edit && " Catat target tiap pihak, misalnya pihak pria Rp 25 jt, lalu catat setorannya."}
+              </p>
+            ) : (
+              <ul className="flex flex-col">
+                {goals.map((g) => {
+                  const list = deposits.filter((d) => d.goalId === g.id);
+                  const p = planFor(g, list.reduce((s, d) => s + d.amount, 0), today, ctx.wedding.akadDate);
+                  const per = PER_LABEL[p.frequency];
+                  return (
+                    <li key={g.id} className="flex flex-col gap-2 border-b border-ground py-3 first:pt-0 last:border-0 last:pb-0">
+                      <div className="flex items-start gap-2">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-bold">{g.name}</span>
+                          <span className="block text-[11px] text-muted">{SIDE_LABEL[g.side]}</span>
+                        </span>
+                        <span className="text-right text-[13px]">
+                          <span className="block font-bold">{rupiahShort(p.saved)}</span>
+                          <span className="block text-[11px] text-muted">dari {rupiahShort(g.target)}</span>
+                        </span>
+                        {edit && (
+                          <FormDialog
+                            variant="icon"
+                            triggerLabel={`Ubah ${g.name}`}
+                            title="Ubah tabungan"
+                            action={updateGoal.bind(null, g.id)}
+                            trigger={<Pencil size={14} aria-hidden="true" />}
+                            footer={
+                              <ActionButton
+                                variant="danger"
+                                action={deleteGoal.bind(null, g.id)}
+                                confirm={`Hapus tabungan ${g.name}? Semua setorannya ikut terhapus.`}
+                                className="mr-auto"
+                              >
+                                Hapus
+                              </ActionButton>
+                            }
+                          >
+                            <GoalFields g={g} today={today} />
+                          </FormDialog>
+                        )}
+                      </div>
+                      <Progress value={g.target ? (p.saved / g.target) * 100 : 0} label={`${g.name} terkumpul`} />
+                      <p className="text-[12px] text-muted">
+                        {p.status === "tercapai"
+                          ? "Target sudah tercapai."
+                          : p.status === "lewat"
+                            ? `Lewat tanggal target ${dateShort(p.due)}, kurang ${rupiahShort(p.remaining)}.`
+                            : `Rencana ${rupiahShort(p.perPeriod)} ${per} sampai ${dateShort(p.due)}. Perlu ${rupiahShort(p.neededNow)} ${per} mulai sekarang.`}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {p.status === "tercapai" && <Status tone="ok">Tercapai</Status>}
+                        {p.status === "sesuai" && <Status tone="ok">Sesuai rencana</Status>}
+                        {p.status === "tertinggal" && <Status tone="warn">Tertinggal {rupiahShort(p.expected - p.saved)}</Status>}
+                        {p.status === "lewat" && <Status tone="warn">Belum tercapai</Status>}
+                        {edit && (
+                          <FormDialog
+                            variant="ground"
+                            size="sm"
+                            triggerClassName="ml-auto"
+                            title={`Setor ke ${g.name}`}
+                            description={p.remaining ? `Sisa target ${rupiah(p.remaining)}.` : undefined}
+                            action={addDeposit.bind(null, g.id)}
+                            submitLabel="Catat setoran"
+                            trigger={
+                              <>
+                                <Plus size={14} aria-hidden="true" />
+                                Setor
+                              </>
+                            }
+                          >
+                            <Field label="Nominal" hint="Boleh ditulis 500000, 500.000, atau 500rb.">
+                              <Input name="amount" inputMode="numeric" required defaultValue={p.neededNow ? String(p.neededNow) : ""} />
+                            </Field>
+                            <Field label="Tanggal">
+                              <DateField name="date" defaultValue={today} />
+                            </Field>
+                            <Field label="Catatan (opsional)">
+                              <Input name="note" maxLength={160} placeholder="Contoh: gaji Maret" />
+                            </Field>
+                          </FormDialog>
+                        )}
+                      </div>
+                      {list.length > 0 && (
+                        <details className="text-[13px]">
+                          <summary className="cursor-pointer text-[12px] font-semibold text-muted">Riwayat setoran ({list.length})</summary>
+                          <ul className="mt-1.5 flex flex-col">
+                            {list.map((d) => (
+                              <li key={d.id} className="flex items-center gap-2 border-b border-ground py-1.5 last:border-0">
+                                <span className="min-w-0 flex-1">
+                                  <span className="block">{dateShort(d.date)}</span>
+                                  {d.note && <span className="block truncate text-[11px] text-muted">{d.note}</span>}
+                                </span>
+                                <span className="font-bold tabular">{rupiah(d.amount)}</span>
+                                {edit && (
+                                  <ActionButton
+                                    variant="icon"
+                                    label={`Hapus setoran ${dateShort(d.date)}`}
+                                    confirm={`Hapus setoran ${rupiah(d.amount)} tanggal ${dateShort(d.date)}?`}
+                                    action={deleteDeposit.bind(null, d.id)}
+                                  >
+                                    <Trash2 size={14} aria-hidden="true" />
+                                  </ActionButton>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
           <Card className="flex flex-col gap-3.5" aria-labelledby="dana-title">
             <SectionTitle
               id="dana-title"
@@ -381,6 +530,31 @@ function FundingFields({ f }: { f?: FundingSource }) {
       </Field>
       <Field label="Nominal">
         <Input name="amount" inputMode="numeric" required defaultValue={f ? String(f.amount) : ""} />
+      </Field>
+    </>
+  );
+}
+
+function GoalFields({ g, today }: { g?: SavingsGoal; today: string }) {
+  return (
+    <>
+      <Field label="Nama tabungan">
+        <Input name="name" required defaultValue={g?.name} placeholder="Contoh: Tabungan pihak pria" />
+      </Field>
+      <Field label="Pihak">
+        <SelectField name="side" defaultValue={g?.side ?? "pengantin"} options={Object.entries(SIDE_LABEL).map(([id, n]) => ({ value: id, label: n }))} />
+      </Field>
+      <Field label="Target" hint="Boleh ditulis 25000000, 25.000.000, atau 25jt.">
+        <Input name="target" inputMode="numeric" required defaultValue={g ? String(g.target) : ""} />
+      </Field>
+      <Field label="Rencana setoran" hint="Nominal per periode dihitung otomatis dari target dan tanggalnya.">
+        <SelectField name="frequency" defaultValue={g?.frequency ?? "bulanan"} options={FREQUENCIES.map((f) => ({ value: f, label: FREQ_LABEL[f] }))} />
+      </Field>
+      <Field label="Mulai menabung">
+        <DateField name="startDate" defaultValue={g?.startDate ?? today} />
+      </Field>
+      <Field label="Target tercapai pada" hint="Kosongkan untuk memakai tanggal akad.">
+        <DateField name="dueDate" defaultValue={g?.dueDate ?? undefined} clearable placeholder="Tanggal akad" />
       </Field>
     </>
   );

@@ -100,6 +100,88 @@ export async function deleteFunding(id: string): Promise<ActionResult> {
 
 /* ---------- Pengeluaran ---------- */
 
+/* ---------- Tabungan ---------- */
+
+const goalSchema = z.object({
+  name: z.string().min(1, "Isi nama tabungan.").max(60),
+  side: z.enum(["pengantin", "pria", "wanita", "lainnya"]),
+  target: amount.min(1, "Isi target tabungan."),
+  frequency: z.enum(["harian", "mingguan", "bulanan"], { message: "Pilih rencana setoran." }),
+  startDate: isoDate,
+  dueDate: isoDate.nullable(),
+});
+
+function parseGoal(fd: FormData) {
+  const g = goalSchema.parse({
+    name: str(fd, "name"),
+    side: str(fd, "side") || "pengantin",
+    target: parseRupiah(str(fd, "target")),
+    frequency: str(fd, "frequency") || "bulanan",
+    startDate: str(fd, "startDate") || todayISO(),
+    dueDate: optStr(fd, "dueDate"),
+  });
+  if (g.dueDate && g.dueDate <= g.startDate) throw new UserError("Tanggal target harus setelah tanggal mulai menabung.");
+  return g;
+}
+
+async function ownGoal(weddingId: string, id: string) {
+  const [g] = await db.select().from(schema.savingsGoal).where(and(eq(schema.savingsGoal.id, id), eq(schema.savingsGoal.weddingId, weddingId)));
+  if (!g) throw new UserError("Tabungan tidak ditemukan.");
+  return g;
+}
+
+export async function addGoal(fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    await db.insert(schema.savingsGoal).values({ ...parseGoal(fd), weddingId: ctx.wedding.id });
+    done();
+  });
+}
+
+export async function updateGoal(id: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    await db
+      .update(schema.savingsGoal)
+      .set(parseGoal(fd))
+      .where(and(eq(schema.savingsGoal.id, id), eq(schema.savingsGoal.weddingId, ctx.wedding.id)));
+    done();
+  });
+}
+
+export async function deleteGoal(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    await db.delete(schema.savingsGoal).where(and(eq(schema.savingsGoal.id, id), eq(schema.savingsGoal.weddingId, ctx.wedding.id)));
+    done();
+  });
+}
+
+const depositSchema = z.object({
+  amount: amount.min(1, "Isi nominal setoran."),
+  date: isoDate,
+  note: z.string().max(160).nullable(),
+});
+
+export async function addDeposit(goalId: string, fd: FormData): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    const g = await ownGoal(ctx.wedding.id, goalId);
+    const data = depositSchema.parse({ amount: parseRupiah(str(fd, "amount")), date: str(fd, "date") || todayISO(), note: optStr(fd, "note") });
+    await db.insert(schema.savingsDeposit).values({ ...data, goalId: g.id, weddingId: ctx.wedding.id });
+    done();
+    return `Setoran ${g.name} tercatat.`;
+  });
+}
+
+export async function deleteDeposit(id: string): Promise<ActionResult> {
+  return run(async () => {
+    const ctx = await requireAction("budget");
+    await db.delete(schema.savingsDeposit).where(and(eq(schema.savingsDeposit.id, id), eq(schema.savingsDeposit.weddingId, ctx.wedding.id)));
+    done();
+  });
+}
+
 async function checkRefs(weddingId: string, refs: { categoryId?: string | null; fundingSourceId?: string | null; fileId?: string | null }) {
   if (refs.categoryId) {
     const [c] = await db
