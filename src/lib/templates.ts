@@ -371,6 +371,7 @@ export const GUEST_CATEGORIES = ["Keluarga", "Rekan ortu", "Kantor", "Teman", "T
 export const DELIVERY = [
   { id: "diantar", name: "Diantar" },
   { id: "whatsapp", name: "WhatsApp" },
+  { id: "instagram", name: "Instagram" },
   { id: "email", name: "Email" },
   { id: "pos", name: "Pos" },
 ];

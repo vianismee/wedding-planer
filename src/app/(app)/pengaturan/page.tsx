@@ -17,6 +17,8 @@ import { RoleSelect } from "./role-select";
 import { MemberAccess, RoleEditor } from "./access";
 import { InstallApp } from "@/components/install-app";
 import { DangerZone, WeddingSwitcher } from "./client";
+import { ApiKeyCreate } from "./api-keys";
+import { deleteApiKey, updateInvitationUrl } from "@/actions/api";
 
 export const metadata: Metadata = { title: "Pengaturan" };
 
@@ -29,7 +31,8 @@ export default async function PengaturanPage({ searchParams }: { searchParams: P
   const manage = can(ctx.perms, "pengaturan", "edit");
   const roles = roleList(ctx.roles);
   const roleOptions = roles.map((r) => ({ value: r.key, label: r.name }));
-  const [members, invites, myWeddings] = await Promise.all([
+  const apiAccess = manage && can(ctx.perms, "tamu", "edit");
+  const [members, invites, myWeddings, apiKeys] = await Promise.all([
     db
       .select({ member: schema.member, name: schema.user.name, email: schema.user.email })
       .from(schema.member)
@@ -45,6 +48,9 @@ export default async function PengaturanPage({ searchParams }: { searchParams: P
       .from(schema.member)
       .innerJoin(schema.wedding, eq(schema.member.weddingId, schema.wedding.id))
       .where(eq(schema.member.userId, ctx.user.id)),
+    apiAccess
+      ? db.select().from(schema.apiKey).where(eq(schema.apiKey.weddingId, w.id)).orderBy(asc(schema.apiKey.createdAt))
+      : Promise.resolve([]),
   ]);
   const base = process.env.BETTER_AUTH_URL ?? "http://localhost:3000";
   const seats = MAX_MEMBERS - members.length;
@@ -62,6 +68,7 @@ export default async function PengaturanPage({ searchParams }: { searchParams: P
           { id: "peran", name: "Peran dan akses" },
         ]
       : []),
+    ...(apiAccess ? [{ id: "api", name: "API undangan" }] : []),
     { id: "akun", name: "Akun" },
     ...(exportGuests || owner ? [{ id: "data", name: "Data dan privasi" }] : []),
   ];
@@ -296,6 +303,53 @@ export default async function PengaturanPage({ searchParams }: { searchParams: P
               </ul>
             </Card>
           )}
+        </div>
+      )}
+      {active === "api" && (
+        <div className="grid grid-cols-1 items-start gap-6 min-[1200px]:grid-cols-2">
+          <Card className="flex flex-col gap-4">
+            <SectionTitle>Kunci API</SectionTitle>
+            <p className="text-[13px] leading-[1.5] text-muted">
+              Hubungkan undangan digital di situs lain supaya nama tamu, RSVP, dan ucapan tersambung ke daftar tamu di sini. Alamat API:{" "}
+              <code className="font-semibold text-ink">{base}/api/v1</code>. Panduan lengkap ada di <code className="font-semibold text-ink">doc/API.md</code>.
+            </p>
+            {apiKeys.length > 0 && (
+              <ul className="flex flex-col">
+                {apiKeys.map((k) => (
+                  <li key={k.id} className="flex flex-wrap items-center gap-3 border-b border-ground py-3 last:border-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[14px] font-bold">
+                        {k.name} <Status tone={k.kind === "server" ? "warn" : "neutral"}>{k.kind === "server" ? "Server" : "Undangan"}</Status>
+                      </p>
+                      <p className="text-[12px] text-muted">
+                        <code>{k.prefix}…</code> · {k.lastUsedAt ? `Terakhir dipakai ${dateShort(k.lastUsedAt.toISOString().slice(0, 10))}` : "Belum pernah dipakai"}
+                        {k.kind === "undangan" && ` · ${k.origins.length ? k.origins.join(", ") : "Semua domain"}`}
+                      </p>
+                    </div>
+                    <ActionButton variant="ghost" size="sm" confirm={`Hapus kunci ${k.name}? Aplikasi yang memakainya langsung terputus.`} action={deleteApiKey.bind(null, k.id)}>
+                      Hapus
+                    </ActionButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="border-t border-ground pt-4">
+              <ApiKeyCreate />
+            </div>
+          </Card>
+
+          <Card className="flex flex-col gap-4">
+            <SectionTitle>Link undangan</SectionTitle>
+            <p className="text-[13px] leading-[1.5] text-muted">
+              Pola link undangan digitalmu. <code className="font-semibold text-ink">{"{kode}"}</code> diganti kode unik tiap tamu, jadi link pribadi tiap tamu bisa disalin
+              dari Daftar tamu. Tanpa <code className="font-semibold text-ink">{"{kode}"}</code>, kode ditambahkan sebagai <code>?to=</code>.
+            </p>
+            <ActionForm action={updateInvitationUrl}>
+              <Field label="Pola link" hint="Contoh: https://undangan.contoh.com/rina-dimas?to={kode}">
+                <Input name="invitationUrl" type="url" defaultValue={w.invitationUrl ?? ""} placeholder="https://undangan.contoh.com/?to={kode}" />
+              </Field>
+            </ActionForm>
+          </Card>
         </div>
       )}
       {active === "akun" && (

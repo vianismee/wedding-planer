@@ -103,6 +103,8 @@ export const wedding = pgTable("wedding", {
   quotaGroom: integer("quota_groom").notNull().default(300),
   quotaBride: integer("quota_bride").notNull().default(300),
   paymentStatus: text("payment_status").notNull().default("free"),
+  // Pola link undangan digital di luar Rukun, misalnya https://undangan.id/rina-dimas?to={kode}.
+  invitationUrl: text("invitation_url"),
   createdBy: text("created_by")
     .notNull()
     .references(() => user.id),
@@ -205,17 +207,58 @@ export const guest = pgTable(
     weddingId: weddingRef(),
     name: text("name").notNull(),
     note: text("note"),
+    phone: text("phone"), // nomor WhatsApp, format 62xxxx
+    instagram: text("instagram"), // username tanpa @
+    address: text("address"),
     category: text("category").notNull().default("Keluarga"),
     side: text("side").notNull(), // pria | wanita
     session: text("session").notNull().default("Sesi 1"),
     pax: integer("pax").notNull().default(2),
-    delivery: text("delivery").notNull().default("diantar"), // diantar | whatsapp | email | pos
+    delivery: text("delivery").notNull().default("diantar"), // diantar | whatsapp | instagram | email | pos
     status: text("status").notNull().default("belum_kirim"), // belum_kirim | terkirim | cek_jumlah
     vip: boolean("vip").notNull().default(false),
+    // Kode pendek di link undangan (?to=kode). Unik per pernikahan, dipakai oleh API undangan.
+    code: text("code")
+      .notNull()
+      .$defaultFn(() => guestCode()),
+    // RSVP dari undangan digital lewat API. Null = belum menjawab.
+    rsvp: text("rsvp"), // hadir | tidak_hadir | ragu
+    rsvpPax: integer("rsvp_pax"),
+    rsvpMessage: text("rsvp_message"),
+    rsvpAt: timestamp("rsvp_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: createdAt(),
   },
-  (t) => [index("guest_wedding_idx").on(t.weddingId)],
+  (t) => [index("guest_wedding_idx").on(t.weddingId), uniqueIndex("guest_wedding_code_uq").on(t.weddingId, t.code)],
+);
+
+/** 8 huruf/angka tanpa karakter yang mirip (0/o, 1/l/i). */
+export function guestCode() {
+  const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => abc[b % abc.length]).join("");
+}
+
+/* ---------- API ---------- */
+
+// Kunci API per pernikahan. Hanya hash SHA-256 yang disimpan; kunci utuh tampil sekali saat dibuat.
+export const apiKey = pgTable(
+  "api_key",
+  {
+    id: id(),
+    weddingId: weddingRef(),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(), // server | undangan
+    prefix: text("prefix").notNull(), // awal kunci untuk dikenali di daftar
+    hash: text("hash").notNull().unique(),
+    // Khusus kunci undangan: origin yang boleh memanggil dari browser (CORS). Kosong = semua origin.
+    origins: jsonb("origins").$type<string[]>().notNull().default([]),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdBy: text("created_by").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("api_key_wedding_idx").on(t.weddingId)],
 );
 
 /* ---------- Budget ---------- */

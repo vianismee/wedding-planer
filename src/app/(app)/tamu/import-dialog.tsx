@@ -7,21 +7,28 @@ import { Modal } from "@/components/forms";
 import { Button, Field, Status } from "@/components/kit";
 import { SelectField } from "@/components/select-field";
 import { number } from "@/lib/format";
+import { normInstagram, normPhone } from "@/lib/contact";
 
 type Parsed = {
   name: string;
   note: string | null;
+  phone: string | null;
+  instagram: string | null;
+  address: string | null;
   category: string;
   side: "pria" | "wanita" | null;
   session: string;
   pax: number;
-  delivery: "diantar" | "whatsapp" | "email" | "pos";
+  delivery: "diantar" | "whatsapp" | "instagram" | "email" | "pos";
 };
 
 // Nama kolom yang dikenali (huruf kecil, tanpa spasi berlebih).
 const COLS: Record<keyof Parsed, string[]> = {
   name: ["nama", "nama tamu", "name", "tamu"],
-  note: ["keterangan", "catatan", "alamat", "hubungan", "note", "kota"],
+  note: ["keterangan", "catatan", "hubungan", "note", "kota"],
+  phone: ["whatsapp", "wa", "no wa", "nomor wa", "no hp", "nomor hp", "hp", "no telp", "no. telp", "telepon", "telp", "nomor"],
+  instagram: ["instagram", "ig", "username ig", "akun ig", "username instagram"],
+  address: ["alamat", "address"],
   category: ["kategori", "category", "kelompok"],
   side: ["pihak", "side", "dari"],
   session: ["sesi", "session"],
@@ -38,6 +45,7 @@ function normSide(v: string): "pria" | "wanita" | null {
 
 function normDelivery(v: string): Parsed["delivery"] {
   const s = v.toLowerCase();
+  if (s.includes("insta") || s === "ig") return "instagram";
   if (s.includes("wa") || s.includes("whats")) return "whatsapp";
   if (s.includes("mail")) return "email";
   if (s.includes("pos")) return "pos";
@@ -74,6 +82,9 @@ export function ImportDialog({ open, onClose, existingNames }: { open: boolean; 
         .map((r) => ({
           name: cell(r, "name").slice(0, 120),
           note: cell(r, "note").slice(0, 160) || null,
+          phone: normPhone(cell(r, "phone")),
+          instagram: normInstagram(cell(r, "instagram")),
+          address: cell(r, "address").slice(0, 300) || null,
           category: cell(r, "category").slice(0, 40) || "Lainnya",
           side: normSide(cell(r, "side")),
           session: cell(r, "session").slice(0, 40) || "Sesi 1",
@@ -114,8 +125,8 @@ export function ImportDialog({ open, onClose, existingNames }: { open: boolean; 
 
   function submit() {
     start(async () => {
-      const payload = toImport.map(({ name, note, category, side, session, pax, delivery }) => ({
-        name, note, category, session, pax, delivery, side: side ?? defaultSide,
+      const payload = toImport.map(({ name, note, phone, instagram, address, category, side, session, pax, delivery }) => ({
+        name, note, phone, instagram, address, category, session, pax, delivery, side: side ?? defaultSide,
       }));
       const r = await importGuests(payload);
       if (!r.ok) return setError(r.error);
@@ -130,7 +141,7 @@ export function ImportDialog({ open, onClose, existingNames }: { open: boolean; 
       onClose={close}
       wide
       title="Import tamu dari Excel atau CSV"
-      description="Baris pertama berisi judul kolom. Kolom yang dikenali: Nama, Keterangan, Kategori, Pihak, Sesi, Jumlah, Kirim via."
+      description="Baris pertama berisi judul kolom. Kolom yang dikenali: Nama, Keterangan, No WA, Instagram, Alamat, Kategori, Pihak, Sesi, Jumlah, Kirim via."
     >
       <div className="flex flex-col gap-4">
         {result && (

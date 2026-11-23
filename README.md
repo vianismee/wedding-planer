@@ -46,6 +46,13 @@ Dicek di server untuk setiap aksi (`src/lib/roles.ts`, `requireAction`).
 
 Pembayaran dan paywall (sesuai permintaan, semua fitur terbuka; kolom `wedding.payment_status` disiapkan). Non-goal PRD lain: undangan digital, RSVP, buku tamu, WhatsApp, dark mode.
 
+## REST API untuk undangan digital
+
+Undangan digital di situs lain bisa terhubung ke daftar tamu lewat `/api/v1` (nama tamu per link, RSVP, ucapan). Kunci API dibuat di Pengaturan → API undangan.
+
+- [doc/API.md](doc/API.md): referensi endpoint
+- [doc/PANDUAN-INTEGRASI-UNDANGAN.md](doc/PANDUAN-INTEGRASI-UNDANGAN.md): langkah integrasi dan contoh kode
+
 ## Deploy (1 VPS)
 
 ```bash

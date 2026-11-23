@@ -2,21 +2,25 @@
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useActionState, useDeferredValue, useMemo, useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, FileSpreadsheet, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { AtSign, Check, ChevronLeft, Link2, ChevronRight, FileSpreadsheet, MapPin, Pencil, Phone, Plus, Search, Trash2 } from "lucide-react";
 import { addGuest, deleteGuest, setGuestsStatus, updateGuest } from "@/actions/tamu";
 import { Modal, type ActionResult, submitWith } from "@/components/forms";
 import { useConfirm } from "@/components/confirm";
-import { Button, Field, Input, Status, cx } from "@/components/kit";
+import { Button, Field, Input, Status, Textarea, cx } from "@/components/kit";
 import { SelectField } from "@/components/select-field";
 import { CreatableSelect } from "@/components/creatable-select";
 import { DELIVERY, GUEST_CATEGORIES, GUEST_STATUS } from "@/lib/templates";
 import { number } from "@/lib/format";
+import { RSVP, igLink, invitationLink, waLink } from "@/lib/contact";
 import { ImportDialog } from "./import-dialog";
 
 export type GuestRow = {
   id: string;
   name: string;
   note: string | null;
+  phone: string | null;
+  instagram: string | null;
+  address: string | null;
   category: string;
   side: string;
   session: string;
@@ -24,17 +28,22 @@ export type GuestRow = {
   delivery: string;
   status: string;
   vip: boolean;
+  code: string;
+  rsvp: string | null;
+  rsvpPax: number | null;
+  rsvpMessage: string | null;
 };
 
 const PAGE_SIZES = [25, 50, 100];
 const deliveryName = (id: string) => DELIVERY.find((d) => d.id === id)?.name ?? id;
 const statusOf = (id: string) => GUEST_STATUS.find((s) => s.id === id) ?? GUEST_STATUS[0];
 
-export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit: boolean }) {
+export function GuestManager({ guests, canEdit, invitationUrl }: { guests: GuestRow[]; canEdit: boolean; invitationUrl: string | null }) {
   const [cat, setCat] = useState("Semua");
   const [side, setSide] = useState("");
   const [session, setSession] = useState("");
   const [status, setStatus] = useState("");
+  const [rsvp, setRsvp] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
@@ -46,7 +55,7 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
 
   // Indeks pencarian dibuat sekali; filter berjalan di memori sehingga 1.500+ tamu tetap di bawah 300 ms.
   const indexed = useMemo(
-    () => guests.map((g) => ({ g, key: `${g.name} ${g.note ?? ""}`.toLowerCase() })),
+    () => guests.map((g) => ({ g, key: `${g.name} ${g.note ?? ""} ${g.phone ?? ""} ${g.instagram ?? ""} ${g.address ?? ""} ${g.code}`.toLowerCase() })),
     [guests],
   );
   const categories = useMemo(() => {
@@ -65,10 +74,11 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
           (!side || g.side === side) &&
           (!session || g.session === session) &&
           (!status || g.status === status) &&
+          (!rsvp || (rsvp === "belum" ? !g.rsvp : g.rsvp === rsvp)) &&
           (!needle || key.includes(needle)),
       )
       .map((x) => x.g);
-  }, [indexed, cat, side, session, status, q]);
+  }, [indexed, cat, side, session, status, rsvp, q]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / perPage));
   // Halaman bisa melewati batas bila tamu dihapus atau filter berubah dari tab lain.
@@ -118,7 +128,7 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
               setQuery(e.target.value);
               setPage(1);
             }}
-            placeholder="Cari nama atau keterangan"
+            placeholder="Cari nama, kontak, atau alamat"
             className="pl-10"
           />
         </label>
@@ -158,6 +168,10 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
             setStatus(v);
             setPage(1);
           }} className="h-10 w-auto!" options={[{ value: "", label: "Semua status" }, ...GUEST_STATUS.map((s) => ({ value: s.id, label: s.name }))]} />
+          <SelectField aria-label="Filter RSVP" value={rsvp} onValueChange={(v) => {
+            setRsvp(v);
+            setPage(1);
+          }} className="h-10 w-auto!" options={[{ value: "", label: "Semua RSVP" }, ...Object.entries(RSVP).map(([id, r]) => ({ value: id, label: r.name })), { value: "belum", label: "Belum menjawab" }]} />
           {canEdit && filtered.some((g) => g.status !== "terkirim") && (
             <Button variant="ghost" size="sm" className="h-10" onClick={markSent} disabled={pending}>
               Tandai yang tampil sudah terkirim
@@ -206,6 +220,7 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
                         {g.vip && <Status tone="info" className="ml-2">VIP</Status>}
                       </div>
                       {g.note && <div className="text-[12px] text-muted">{g.note}</div>}
+                      <Contact g={g} link={invitationLink(invitationUrl, g.code)} />
                     </td>
                     <td className="px-3 py-2.5">{g.category}</td>
                     <td className="px-3 py-2.5">{g.side === "pria" ? "Pria" : "Wanita"}</td>
@@ -236,6 +251,7 @@ export function GuestManager({ guests, canEdit }: { guests: GuestRow[]; canEdit:
                     {g.vip && <Status tone="info" className="ml-2">VIP</Status>}
                   </div>
                   {g.note && <div className="text-[12px] text-muted">{g.note}</div>}
+                  <Contact g={g} link={invitationLink(invitationUrl, g.code)} />
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
                     <span>{g.category}</span>
                     <span>Pihak {g.side}</span>
@@ -313,6 +329,65 @@ function Pager({ page, pages, onPage }: { page: number; pages: number; onPage: (
   );
 }
 
+/** Nomor WA, username IG, alamat, link undangan, dan RSVP di bawah nama. */
+function Contact({ g, link }: { g: GuestRow; link: string | null }) {
+  if (!g.phone && !g.instagram && !g.address && !link && !g.rsvp) return null;
+  const r = g.rsvp ? RSVP[g.rsvp as keyof typeof RSVP] : null;
+  const linkCls = "inline-flex items-center gap-1 font-semibold text-ink underline-offset-2 hover:underline";
+  return (
+    <div className="mt-1 flex flex-col gap-0.5 text-[12px]">
+      {(g.phone || g.instagram) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+          {g.phone && (
+            <a href={waLink(g.phone)} target="_blank" rel="noopener noreferrer" className={linkCls} aria-label={`Chat WhatsApp ${g.name}`}>
+              <Phone size={12} aria-hidden="true" />+{g.phone}
+            </a>
+          )}
+          {g.instagram && (
+            <a href={igLink(g.instagram)} target="_blank" rel="noopener noreferrer" className={linkCls} aria-label={`Instagram ${g.name}`}>
+              <AtSign size={12} aria-hidden="true" />{g.instagram}
+            </a>
+          )}
+        </div>
+      )}
+      {g.address && (
+        <div className="flex items-start gap-1 text-muted">
+          <MapPin size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="whitespace-pre-line">{g.address}</span>
+        </div>
+      )}
+      {link && <CopyInvite link={link} name={g.name} />}
+      {r && (
+        <div className="mt-1 flex flex-col gap-0.5">
+          <span>
+            <Status tone={r.tone}>RSVP: {r.name}{g.rsvp === "hadir" && g.rsvpPax ? `, ${g.rsvpPax} orang` : ""}</Status>
+          </span>
+          {g.rsvpMessage && <span className="italic text-muted">“{g.rsvpMessage}”</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CopyInvite({ link, name }: { link: string; name: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await navigator.clipboard.writeText(link);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+      aria-label={`Salin link undangan ${name}`}
+      className="inline-flex items-center gap-1 self-start font-semibold text-ink underline-offset-2 hover:underline"
+    >
+      {copied ? <Check size={12} aria-hidden="true" /> : <Link2 size={12} aria-hidden="true" />}
+      {copied ? "Link tersalin" : "Salin link undangan"}
+    </button>
+  );
+}
+
 function RowActions({ g, onEdit }: { g: GuestRow; onEdit: () => void }) {
   const [pending, start] = useTransition();
   const dialogs = useConfirm();
@@ -358,6 +433,7 @@ function GuestDialog({
   onClose: () => void;
 }) {
   const g = guest && guest !== "new" ? guest : null;
+  const [delivery, setDelivery] = useState(g?.delivery ?? "diantar");
   const [state, action, pending] = useActionState(async (_p: ActionResult | null, fd: FormData) => {
     const r = g ? await updateGuest(g.id, fd) : await addGuest(fd);
     if (r.ok) onClose();
@@ -387,12 +463,22 @@ function GuestDialog({
             <Input name="pax" type="number" min={1} max={500} required defaultValue={g?.pax ?? 2} />
           </Field>
           <Field label="Kirim undangan via">
-            <SelectField name="delivery" defaultValue={g?.delivery ?? "diantar"} options={[...DELIVERY.map((d) => ({ value: d.id, label: d.name }))]} />
+            <SelectField name="delivery" value={delivery} onValueChange={setDelivery} options={[...DELIVERY.map((d) => ({ value: d.id, label: d.name }))]} />
           </Field>
           <Field label="Status">
             <SelectField name="status" defaultValue={g?.status ?? "belum_kirim"} options={[...GUEST_STATUS.map((s) => ({ value: s.id, label: s.name }))]} />
           </Field>
         </div>
+        {/* Kedua kolom tetap terkirim walau tersembunyi, supaya kontak tidak hilang saat cara kirim diganti. */}
+        <Field label="Nomor WhatsApp" hint="Boleh 0812… atau +62 812…." className={cx(delivery !== "whatsapp" && "hidden")}>
+          <Input name="phone" type="tel" inputMode="tel" autoComplete="off" defaultValue={g?.phone ? `+${g.phone}` : ""} placeholder="0812 3456 7890" />
+        </Field>
+        <Field label="Username Instagram" hint="Tanpa @, atau tempel tautan profilnya." className={cx(delivery !== "instagram" && "hidden")}>
+          <Input name="instagram" autoComplete="off" autoCapitalize="none" spellCheck={false} defaultValue={g?.instagram ?? ""} placeholder="namapengguna" />
+        </Field>
+        <Field label="Alamat (opsional)">
+          <Textarea name="address" rows={2} maxLength={300} defaultValue={g?.address ?? ""} placeholder="Jalan, nomor rumah, kota" />
+        </Field>
         <label className="flex items-center gap-3 text-[14px] font-semibold">
           <input type="checkbox" name="vip" defaultChecked={g?.vip} className="size-5 accent-[#1C1B29]" />
           Tamu VIP

@@ -19,6 +19,9 @@ export default async function TamuPage() {
       id: schema.guest.id,
       name: schema.guest.name,
       note: schema.guest.note,
+      phone: schema.guest.phone,
+      instagram: schema.guest.instagram,
+      address: schema.guest.address,
       category: schema.guest.category,
       side: schema.guest.side,
       session: schema.guest.session,
@@ -26,6 +29,10 @@ export default async function TamuPage() {
       delivery: schema.guest.delivery,
       status: schema.guest.status,
       vip: schema.guest.vip,
+      code: schema.guest.code,
+      rsvp: schema.guest.rsvp,
+      rsvpPax: schema.guest.rsvpPax,
+      rsvpMessage: schema.guest.rsvpMessage,
     })
     .from(schema.guest)
     .where(eq(schema.guest.weddingId, w.id))
@@ -79,7 +86,7 @@ export default async function TamuPage() {
       )}
 
       {!edit && <ViewOnly what="daftar tamu" />}
-      <GuestManager guests={guests} canEdit={edit} />
+      <GuestManager guests={guests} canEdit={edit} invitationUrl={w.invitationUrl} />
     </>
   );
 }

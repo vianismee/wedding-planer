@@ -7,23 +7,36 @@ import { db, schema } from "@/db";
 import { requireAction } from "@/lib/session";
 import { optStr, run, str, UserError, type ActionResult } from "@/lib/action";
 import { track } from "@/lib/analytics";
+import { normInstagram, normPhone } from "@/lib/contact";
 
 const guestSchema = z.object({
   name: z.string().min(1, "Isi nama tamu.").max(120),
   note: z.string().max(160).nullable(),
+  phone: z.string().max(20).nullable(),
+  instagram: z.string().max(30).nullable(),
+  address: z.string().max(300, "Alamat maksimal 300 karakter.").nullable(),
   category: z.string().min(1).max(40),
   side: z.enum(["pria", "wanita"], { message: "Pilih pihak tamu." }),
   session: z.string().min(1).max(40),
   pax: z.number().int().min(1, "Jumlah orang minimal 1.").max(500),
-  delivery: z.enum(["diantar", "whatsapp", "email", "pos"]),
+  delivery: z.enum(["diantar", "whatsapp", "instagram", "email", "pos"]),
   status: z.enum(["belum_kirim", "terkirim", "cek_jumlah"]),
   vip: z.boolean(),
 });
 
 function parseGuest(fd: FormData) {
+  const rawPhone = str(fd, "phone");
+  const rawIg = str(fd, "instagram");
+  const phone = rawPhone ? normPhone(rawPhone) : null;
+  const instagram = rawIg ? normInstagram(rawIg) : null;
+  if (rawPhone && !phone) throw new UserError("Nomor WhatsApp tidak valid. Contoh: 0812 3456 7890.");
+  if (rawIg && !instagram) throw new UserError("Username Instagram hanya boleh huruf, angka, titik, dan garis bawah.");
   return guestSchema.parse({
     name: str(fd, "name"),
     note: optStr(fd, "note"),
+    phone,
+    instagram,
+    address: optStr(fd, "address"),
     category: str(fd, "category") || "Lainnya",
     side: str(fd, "side"),
     session: str(fd, "session") || "Sesi 1",
@@ -93,11 +106,14 @@ export async function setGuestsStatus(ids: string[], status: string): Promise<Ac
 const importRow = z.object({
   name: z.string().min(1).max(120),
   note: z.string().max(160).nullable(),
+  phone: z.string().regex(/^\d{9,15}$/).nullable(),
+  instagram: z.string().regex(/^[a-z0-9._]{1,30}$/).nullable(),
+  address: z.string().max(300).nullable(),
   category: z.string().min(1).max(40),
   side: z.enum(["pria", "wanita"]),
   session: z.string().min(1).max(40),
   pax: z.number().int().min(1).max(500),
-  delivery: z.enum(["diantar", "whatsapp", "email", "pos"]),
+  delivery: z.enum(["diantar", "whatsapp", "instagram", "email", "pos"]),
 });
 
 /** Import hasil pratinjau Excel/CSV. Baris sudah dibersihkan di klien, divalidasi ulang di sini. */
