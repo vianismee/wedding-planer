@@ -2,7 +2,7 @@ import "server-only";
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 
-// Mengambil foto dan video dari link (Instagram, Pinterest, atau halaman apa pun dengan og:image/og:video)
+// Mengambil foto dan video dari link (Instagram, Threads, Pinterest, atau halaman apa pun dengan og:image/og:video)
 // untuk kartu media moodboard. Link berasal dari pengguna, jadi setiap permintaan, termasuk setiap
 // redirect, diperiksa supaya tidak bisa diarahkan ke jaringan internal server.
 
@@ -126,6 +126,8 @@ export async function download(item: LinkItem) {
 /* ---------- Instagram ---------- */
 
 type IgMedia = {
+  code?: string;
+  // 1 foto, 2 video, 8 carousel, 19 teks saja (Threads).
   media_type?: number;
   original_width?: number;
   original_height?: number;
@@ -162,6 +164,11 @@ async function instagram(code: string): Promise<LinkResult> {
     if (og.items.length) return og;
     throw new LinkError("Postingan Instagram ini tidak bisa dibuka tanpa login. Mungkin akunnya privat.");
   }
+  return { title: postTitle(post, "Instagram"), items: mediaItems(post) };
+}
+
+/** Foto dan video sebuah postingan Instagram atau Threads; carousel jadi beberapa item. */
+function mediaItems(post: IgMedia) {
   const items: LinkItem[] = [];
   for (const m of post.carousel_media?.length ? post.carousel_media : [post]) {
     const w = m.original_width;
@@ -173,8 +180,45 @@ async function instagram(code: string): Promise<LinkResult> {
       if (img) items.push({ url: img.url, kind: "image", w: w ?? img.width, h: h ?? img.height });
     }
   }
-  const caption = post.caption?.text?.split("\n")[0]?.trim();
-  return { title: caption || (post.user?.username ? `@${post.user.username}` : "Instagram"), items };
+  return items;
+}
+
+const postTitle = (post: IgMedia, site: string) =>
+  post.caption?.text?.split("\n")[0]?.trim() || (post.user?.username ? `@${post.user.username}` : site);
+
+/* ---------- Threads ---------- */
+
+/** Objek postingan dengan kode tertentu di data halaman (halaman juga memuat balasan dan postingan lain). */
+function findPost(o: unknown, code: string, depth = 0): IgMedia | undefined {
+  if (!o || typeof o !== "object" || depth > 60) return undefined;
+  const r = o as Record<string, unknown>;
+  if (r.code === code && "media_type" in r) return r as IgMedia;
+  for (const v of Object.values(r)) {
+    const x = findPost(v, code, depth + 1);
+    if (x) return x;
+  }
+}
+
+/**
+ * Threads: hanya foto dan video dari postingan itu sendiri. Pratinjau og:image tidak dipakai, karena untuk
+ * postingan teks isinya gambar buatan Threads (foto profil atau kartu teks), bukan foto referensi.
+ */
+async function threads(u: URL, code: string): Promise<LinkResult> {
+  const { text } = await getText(`https://www.threads.com${u.pathname}`, BOT_UA);
+  let post: IgMedia | undefined;
+  for (const m of text.matchAll(/<script\b[^>]*\bdata-sjs[^>]*>(\{.+?\})<\/script>/g)) {
+    if (!m[1].includes(`"code":"${code}"`)) continue;
+    try {
+      post = findPost(JSON.parse(m[1]), code);
+    } catch {
+      continue;
+    }
+    if (post) break;
+  }
+  if (!post) throw new LinkError("Postingan Threads ini tidak bisa dibuka tanpa login. Mungkin akunnya privat atau postingannya sudah dihapus.");
+  const items = mediaItems(post);
+  if (!items.length) throw new LinkError("Postingan Threads ini hanya berisi teks, tidak ada foto atau video untuk diambil.");
+  return { title: postTitle(post, "Threads"), items };
 }
 
 /* ---------- Pinterest ---------- */
@@ -279,6 +323,12 @@ function route(u: URL) {
     const code = u.pathname.match(/^\/(?:[\w.]+\/)?(?:p|reel|reels|tv)\/([\w-]+)/)?.[1];
     if (code) return () => instagram(code);
   }
+  if (/(^|\.)threads\.(net|com)$/.test(host)) {
+    // /@akun/post/KODE. Link bagikan (/share/…, /t/…) sudah diikuti ke alamat ini oleh resolveLink.
+    const code = u.pathname.match(/^\/@[\w.]+\/post\/([\w-]+)/)?.[1];
+    if (code) return () => threads(u, code);
+    throw new LinkError("Itu bukan link postingan Threads. Buka postingannya, lalu salin linknya.");
+  }
   if (/(^|\.)pinterest\.[a-z.]+$/.test(host)) {
     const id = u.pathname.match(/^\/pin\/(?:[^/]*--?)?(\d+)/)?.[1];
     if (id) return () => pinterest(id);
@@ -293,6 +343,14 @@ export async function resolveLink(raw: string): Promise<LinkResult> {
     u = new URL(raw.trim());
   } catch {
     throw new LinkError("Itu bukan link. Salin alamat lengkap yang diawali https://.");
+  }
+  // Link dari tombol Bagikan Threads (/share/KODE, /t/KODE) dialihkan ke /@akun/post/KODE,
+  // tapi hanya untuk crawler; browser biasa mendapat halaman perantara.
+  if (/(^|\.)threads\.(net|com)$/.test(u.hostname) && /^\/(share|t)\//.test(u.pathname)) {
+    const { res, url } = await safeFetch(u.toString(), { headers: { "User-Agent": BOT_UA } });
+    await res.body?.cancel();
+    if (!/^\/@[\w.]+\/post\//.test(url.pathname)) throw new LinkError("Link bagikan Threads ini tidak mengarah ke postingan. Mungkin postingannya sudah dihapus.");
+    u = url;
   }
   let run = route(u);
   if (!run && u.hostname === "pin.it") {

@@ -28,6 +28,7 @@ export function sourceName(url: string) {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
     if (/(^|\.)instagram\.com$/.test(host)) return "Instagram";
+    if (/(^|\.)threads\.(net|com)$/.test(host)) return "Threads";
     if (/(^|\.)pinterest\.[a-z.]+$/.test(host) || host === "pin.it") return "Pinterest";
     if (/(^|\.)tiktok\.com$/.test(host)) return "TikTok";
     return host;

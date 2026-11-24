@@ -22,11 +22,14 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
     ],
+    // Android: Rukun muncul di menu Bagikan (misalnya dari Instagram). Link post masuk ke Moodboard.
+    share_target: { action: "/moodboard", method: "GET", params: { title: "title", text: "text", url: "url" } },
     shortcuts: [
       { name: "Jadwal", url: "/jadwal", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
       { name: "Daftar tamu", url: "/tamu", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
       { name: "Budget", url: "/budget", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
       { name: "Checklist", url: "/checklist", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
+      { name: "Moodboard", url: "/moodboard", icons: [{ src: "/icon-192.png", sizes: "192x192" }] },
     ],
   };
 }

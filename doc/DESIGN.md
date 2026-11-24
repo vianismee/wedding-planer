@@ -149,7 +149,7 @@ Kartu tidak diberi bayangan. Kartu dibedakan dari latar lewat warna (`surface` d
 - `position: fixed`, tengah, `bottom: 16px + env(safe-area-inset-bottom)`.
 - Latar `ink`, padding 8px, jarak antar item 4px.
 - Maksimal 5 item: Beranda, Acara, Tamu, Budget, Lainnya. Halaman lain masuk ke "Lainnya" (sheet berisi Vendor, Checklist, Seserahan, Moodboard, Dokumen, Pengaturan).
-- Moodboard hanya untuk layar ≥ 768px (tablet dan web): tidak bisa dipasang di capsule, di "Lainnya" disembunyikan di bawah 768px, dan halamannya di HP hanya menampilkan penjelasan. Alasannya: menyusun dan menyambung foto butuh layar lebar.
+- Moodboard di bawah 768px tampil sebagai galeri (lihat Moodboard di bagian 6), bukan kanvas. Menyusun dan menyambung foto tetap butuh layar lebar.
 - Item nonaktif: lingkaran 48×48, hanya ikon, wajib `aria-label`.
 - Item aktif: melebar, latar aksen, ikon dan label teks, `aria-current="page"`.
 - Transisi lebar 200ms ease. Tanpa animasi lain.
@@ -216,6 +216,10 @@ Wadah `ground` dengan padding 4. Tab aktif berlatar `ink` dan teks putih. Jumlah
 - Pemilih warna memakai Cromia dari 21st.dev (`components/ui/cromia-color-picker.tsx`, dibungkus `components/color-field.tsx`). Tanpa kanal alpha karena warna palet disimpan sebagai hex 6 digit; warna cepat diambil dari palet lain di papan yang sama.
 - Semua aksi punya jalur keyboard: daftar elemen di panel Layer, menyambung lewat pilihan kartu di panel Properti, angka X/Y/L/T, tombol panah untuk menggeser, Ctrl+G dan Ctrl+Shift+G untuk kelompok, Ctrl+] dan Ctrl+[ untuk urutan lapisan.
 - Tag bawaan hanya saran. Anggota bisa menambah tag sendiri; tag yang tidak dipakai kartu mana pun hilang dari daftar.
+- **Di HP (< 768px): galeri, bukan kanvas.** Kanvas tidak dipasang sama sekali. Tiap papan jadi seksi (nama `muted` dan garis tipis). Frame tampil sebagai kartu album bertumpuk tiga foto seperti folder Galeri (foto paling depan diberi bayangan kecil sebagai penanda kedalaman tumpukan; satu-satunya bayangan pada kartu), dan foto di luar frame masuk album "Di luar frame" (atau "Semua foto" bila papan tanpa frame). Album dibuka sebagai grid dua kolom ala Pinterest (masonry): tiap foto dengan rasio aslinya, dibatasi antara 0,6 dan 1,8 (tinggi/lebar) supaya grid tetap rapi. Foto dibuka layar penuh yang bisa digeser (sentuh, seret mouse, atau tombol panah); foto yang menjauh dari tengah mengecil, memudar, dan sedikit miring. Carousel Instagram dipecah per slide. Di bawah foto: judul dan tag, catatan, lalu baris aksi berukuran sama (Tulis catatan, sumber link, Hapus). Hapus selalu lewat popup konfirmasi di tengah layar yang menyebut apa yang hilang.
+- Catatan foto di HP adalah kartu Catatan biasa yang tersambung connector dengan foto itu. Catatan baru ditaruh di kanan foto (lalu bawah, kiri, atas; di dalam frame hanya kanan dan bawah, dan frame diperlebar bila perlu), jadi di laptop langsung tampil bersambung. Sebaliknya, catatan yang disambung ke foto dari laptop ikut tampil di HP. Foto yang punya catatan diberi ikon catatan di grid. Yang bisa dilakukan di HP: membuat frame baru (kartu "Frame baru" di akhir tiap papan; frame ditaruh di kanan seluruh isi papan dan langsung muncul di kanvas laptop), menambah foto dari galeri, menempel link, dan menghapus. Kartu baru ditaruh di sel kosong frame; bila frame penuh, frame diperpanjang ke bawah. Kartu di luar frame ditaruh di kanan seluruh isi papan supaya susunan di laptop tidak tertimpa.
+- Tombol "Tambah" di HP melayang di pojok kanan bawah (latar `ink`, radius 12px, bayangan capsule karena melayang), tetap di tempat saat album dibuka. Di dalam album, tombol itu menambah ke album yang sedang dibuka. Toast naik di atasnya supaya tidak menutupi tombol.
+- Android: Rukun terdaftar di menu Bagikan (`share_target` di manifest), jadi link post dari Instagram langsung membuka lembar "Tambah referensi" dengan link terisi. iPhone: Salin link lalu tombol Tempel.
 - Simpan otomatis 800ms setelah perubahan. Bila anggota lain sudah menyimpan papan yang sama, simpanan ditolak dan pengguna diminta memuat ulang, bukan ditimpa diam-diam.
 
 ### Akses hanya lihat
@@ -254,6 +258,7 @@ lucide-react (bawaan shadcn), stroke 2, ukuran 18px di nav dan 20px di capsule. 
 - Hanya ada respons hover dan press (150ms), transisi lebar capsule (200ms), dan munculnya action bar (200ms, naik 8px).
 - Tidak ada animasi berulang, pulse, atau animasi masuk bertumpuk.
 - Hormati `prefers-reduced-motion`: semua transisi menjadi 0ms.
+- Pengecualian: galeri Moodboard di HP memakai GSAP supaya terasa seperti aplikasi Galeri. Kartu album muncul berurutan saat halaman dibuka, tumpukan foto merenggang saat ditekan, album masuk dari kanan, foto terbang dari grid ke layar penuh dan kembali, lembar tambah naik dari bawah, dan kartu baru muncul dengan pop kecil. Semuanya sekali jalan (tanpa animasi berulang) dan menjadi 0ms dengan `prefers-reduced-motion`.
 
 ---
 

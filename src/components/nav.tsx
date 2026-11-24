@@ -214,9 +214,6 @@ export function Sidebar({
 }
 
 /** Capsule bar untuk layar di bawah 900px (DESIGN.md 5). Maksimal 5 item. */
-// Menu yang hanya bisa dipakai di tablet dan laptop: tidak boleh masuk capsule,
-// dan di menu Lainnya hanya muncul mulai 768px.
-const WIDE_ONLY: NavId[] = ["moodboard"];
 const CAPSULE_MAX = 4;
 const CAPSULE_DEFAULT: NavId[] = [
   "dashboard",
@@ -243,7 +240,7 @@ export function Capsule({
   const [editing, setEditing] = useState(false);
   // Pilihan anggota (bila ada) dipakai lebih dulu; menu yang tidak boleh dibuka perannya diabaikan.
   const custom = (saved ?? [])
-    .filter((i): i is NavId => items.includes(i as NavId) && !WIDE_ONLY.includes(i as NavId))
+    .filter((i): i is NavId => items.includes(i as NavId))
     .slice(0, CAPSULE_MAX);
   const primary = custom.length ? custom : defaultCapsule(items);
   const rest = items.filter((i) => !primary.includes(i));
@@ -307,7 +304,7 @@ export function Capsule({
       >
         {editing ? (
           <CapsuleEditor
-            items={items.filter((i) => !WIDE_ONLY.includes(i))}
+            items={items}
             current={primary}
             isCustom={custom.length > 0}
             onDone={() => setEditing(false)}
@@ -328,7 +325,6 @@ export function Capsule({
                     className={cx(
                       "flex min-h-14 items-center gap-3 rounded-2xl px-4 text-[14px] font-semibold no-underline",
                       active ? "bg-accent text-ink" : "bg-ground text-ink",
-                      WIDE_ONLY.includes(id) && "max-[767px]:hidden",
                     )}
                   >
                     <Icon size={18} aria-hidden="true" />

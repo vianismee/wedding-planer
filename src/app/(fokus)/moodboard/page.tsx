@@ -4,16 +4,24 @@ import { db, schema } from "@/db";
 import { requirePage } from "@/lib/session";
 import { can } from "@/lib/roles";
 import { MOOD_BOARDS, type MoodBoardId } from "@/lib/moodboard";
-import { LinkButton } from "@/components/kit";
 import { moodFontVars } from "@/lib/mood-fonts";
 import { MoodboardCanvas } from "./canvas";
+import { MoodboardMobile } from "./mobile";
 import { MoodboardReadOnly } from "./read-only";
+import { ViewSwitch } from "./view-switch";
 
 export const metadata: Metadata = { title: "Moodboard" };
 
-export default async function MoodboardPage() {
+/** Link pertama dari data "Bagikan" (Android): Instagram menaruh link post di `text`, bukan di `url`. */
+function sharedLink(sp: Record<string, string | string[] | undefined>) {
+  const all = ["url", "text", "title"].map((k) => sp[k]).flat().filter(Boolean).join(" ");
+  return all.match(/https?:\/\/\S+/)?.[0] ?? null;
+}
+
+export default async function MoodboardPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requirePage("moodboard");
   const rows = await db.select().from(schema.moodboard).where(eq(schema.moodboard.weddingId, ctx.wedding.id));
+  const edit = can(ctx.perms, "moodboard", "edit");
 
   const data = {} as Record<MoodBoardId, schema.MoodData>;
   const rev = {} as Record<MoodBoardId, number>;
@@ -26,24 +34,17 @@ export default async function MoodboardPage() {
   }
 
   return (
-    <>
-      {/* Menyusun dan menyambung foto butuh layar lebar: di HP hanya tampil penjelasan. */}
-      <section className="flex flex-col items-start gap-2 rounded-[22px] bg-surface p-6 min-[768px]:hidden">
-        <h1 className="text-[22px] font-extrabold">Moodboard dibuka di tablet atau laptop</h1>
-        <p className="text-[14px] text-muted">
-          Menyusun dan menyambung foto referensi butuh layar yang lebih lebar. Buka halaman ini dari tablet atau browser di laptop.
-        </p>
-        <LinkButton href="/dashboard" variant="ground" className="mt-2">
-          Kembali ke beranda
-        </LinkButton>
-      </section>
-      <div className={`hidden h-[calc(100dvh-24px)] min-h-[520px] min-[768px]:block ${moodFontVars}`}>
-        {can(ctx.perms, "moodboard", "edit") ? (
-          <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} me={{ id: ctx.user.id, name: ctx.user.name }} />
-        ) : (
-          <MoodboardReadOnly boards={data} />
-        )}
-      </div>
-    </>
+    <ViewSwitch
+      wide={
+        <div className={`h-[calc(100dvh-24px)] min-h-[520px] ${moodFontVars}`}>
+          {edit ? (
+            <MoodboardCanvas initial={data} initialRev={rev} initialShare={share} me={{ id: ctx.user.id, name: ctx.user.name }} />
+          ) : (
+            <MoodboardReadOnly boards={data} />
+          )}
+        </div>
+      }
+      narrow={<MoodboardMobile initial={data} edit={edit} shared={edit ? sharedLink(await searchParams) : null} />}
+    />
   );
 }

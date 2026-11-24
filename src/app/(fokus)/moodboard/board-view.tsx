@@ -532,7 +532,7 @@ export function EdgeLabel({ e, at, selected, onPointerDown }: { e: MoodEdge; at:
     <div
       onPointerDown={onPointerDown}
       className={cx(
-        "absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border bg-surface px-2 py-[3px] text-[12px] font-semibold",
+        "absolute z-[1] -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border bg-surface px-2 py-[3px] text-[12px] font-semibold",
         onPointerDown && "cursor-pointer",
         selected ? "border-ink" : "border-line",
       )}

@@ -168,7 +168,8 @@ export function MoodboardViewer({ data: all, fileBase }: { data: MoodData; fileB
               </div>
             );
           })}
-          <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1" aria-hidden="true">
+          {/* Sambungan di atas frame dan kartu, supaya tidak tertutup latar frame. */}
+          <svg className="pointer-events-none absolute left-0 top-0 z-[1] overflow-visible" width="1" height="1" aria-hidden="true">
             {data.edges.map((ed) => {
               const A = byId.get(ed.from);
               const B = byId.get(ed.to);
