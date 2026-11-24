@@ -11,7 +11,7 @@ import { ChevronLeft, ClipboardPaste, ExternalLink, Images, Layers, NotebookPen,
 import type { MoodData, MoodMedia, MoodNode } from "@/db/schema";
 import { applyOps, MOOD_BOARDS, MOOD_LIMITS, sourceName, type MoodBoardId, type MoodOp } from "@/lib/moodboard";
 import { Button, cx, Input, Textarea } from "@/components/kit";
-import { boxOf, MEDIA_FOOTER } from "./board-view";
+import { boxOf, MEDIA_FOOTER, SilentFor } from "./board-view";
 
 gsap.registerPlugin(useGSAP);
 
@@ -781,31 +781,74 @@ export function MoodboardMobile({ initial, edit, shared }: { initial: Boards; ed
     });
   }, [swipeFx]);
 
-  // Seret dengan mouse (sentuhan sudah ditangani scroll-snap bawaan browser).
-  const dragX = useRef<{ x: number; left: number; t: number } | null>(null);
+  /*
+   * Gestur di foto penuh. Geser ke samping: sentuhan ditangani scroll-snap bawaan browser, mouse diseret di sini.
+   * Geser ke bawah (sentuhan atau mouse): foto ikut turun, mengecil, latar memudar; dilepas cukup jauh atau cepat
+   * menutup foto penuh, kalau tidak foto kembali ke tengah. `touch-action: pan-x` di track membuat gerak vertikal
+   * sampai ke sini, bukan ke browser.
+   */
+  const gesture = useRef<{ x: number; y: number; t: number; left: number; mode: "h" | "v" | null; mouse: boolean } | null>(null);
+  const slideMedia = (track: HTMLElement) => track.querySelector<HTMLElement>(`[data-slide="${shown}"] > div`);
+
   function onTrackDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (e.pointerType !== "mouse" || e.button !== 0 || (e.target as HTMLElement).closest("video")) return;
+    if (e.button !== 0 || (e.target as HTMLElement).closest("video")) return;
     const track = e.currentTarget;
-    gsap.killTweensOf(track);
-    track.style.scrollSnapType = "none";
-    track.setPointerCapture(e.pointerId);
-    dragX.current = { x: e.clientX, left: track.scrollLeft, t: performance.now() };
+    const mouse = e.pointerType === "mouse";
+    if (mouse) gsap.killTweensOf(track);
+    gesture.current = { x: e.clientX, y: e.clientY, t: performance.now(), left: track.scrollLeft, mode: null, mouse };
   }
+
   function onTrackMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!dragX.current) return;
-    e.currentTarget.scrollLeft = dragX.current.left - (e.clientX - dragX.current.x);
-  }
-  function onTrackUp(e: React.PointerEvent<HTMLDivElement>) {
-    const d = dragX.current;
-    if (!d) return;
-    dragX.current = null;
+    const g = gesture.current;
+    if (!g) return;
     const track = e.currentTarget;
-    const w = track.clientWidth;
-    const dx = e.clientX - d.x;
-    const fast = Math.abs(dx) / Math.max(1, performance.now() - d.t) > 0.4;
-    const start = Math.round(d.left / w);
-    // Seret cepat atau lebih dari seperlima layar: pindah satu foto.
-    goTo(fast || Math.abs(dx) > w / 5 ? start - Math.sign(dx) : start);
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    if (!g.mode) {
+      if (Math.hypot(dx, dy) < 8) return;
+      // Arah ditentukan sekali di awal gerakan, supaya geser samping tidak ikut menutup.
+      if (Math.abs(dy) > Math.abs(dx) && dy > 0) g.mode = "v";
+      else if (g.mouse) g.mode = "h";
+      else return void (gesture.current = null);
+      track.setPointerCapture(e.pointerId);
+      if (g.mode === "h") track.style.scrollSnapType = "none";
+    }
+    if (g.mode === "h") {
+      track.scrollLeft = g.left - dx;
+      return;
+    }
+    const down = Math.max(0, dy);
+    const media = slideMedia(track);
+    if (media) gsap.set(media, { x: dx * 0.5, y: down, scale: 1 - Math.min(0.35, down / 900), rotate: 0 });
+    const el = viewerEl.current;
+    if (el) {
+      gsap.set(el.querySelector("[data-shade]"), { autoAlpha: 1 - Math.min(0.85, down / 400) });
+      gsap.set(el.querySelectorAll("[data-chrome]"), { autoAlpha: down > 24 ? 0 : 1 });
+    }
+  }
+
+  function onTrackUp(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gesture.current;
+    gesture.current = null;
+    if (!g?.mode) return;
+    const track = e.currentTarget;
+    const dx = e.clientX - g.x;
+    const dy = e.clientY - g.y;
+    const speed = Math.hypot(dx, dy) / Math.max(1, performance.now() - g.t);
+    if (g.mode === "h") {
+      const start = Math.round(g.left / track.clientWidth);
+      // Seret cepat atau lebih dari seperlima layar: pindah satu foto.
+      return goTo(speed > 0.4 || Math.abs(dx) > track.clientWidth / 5 ? start - Math.sign(dx) : start);
+    }
+    // Cukup jauh atau sentakan cepat ke bawah: tutup. Foto terbang dari posisinya sekarang ke grid.
+    if (e.type === "pointerup" && (dy > 120 || (speed > 0.6 && dy > 40))) return back();
+    const el = viewerEl.current;
+    const media = slideMedia(track);
+    if (media) gsap.to(media, { x: 0, y: 0, scale: 1, duration: t(0.35), ease: "back.out(1.4)" });
+    if (el) {
+      gsap.to(el.querySelector("[data-shade]"), { autoAlpha: 1, duration: t(0.25) });
+      gsap.to(el.querySelectorAll("[data-chrome]"), { autoAlpha: 1, duration: t(0.25) });
+    }
   }
 
   // Video di slide lain berhenti saat digeser.
@@ -920,17 +963,20 @@ export function MoodboardMobile({ initial, edit, shared }: { initial: Boards; ed
                           className="relative overflow-hidden rounded-[14px] bg-sunken [-webkit-tap-highlight-color:transparent] active:opacity-80"
                         >
                           <Thumb node={n} className="size-full" onRatio={(r) => ratios[n.id] !== r && setRatios((x) => ({ ...x, [n.id]: r }))} />
-                          {n.media?.[0]?.kind === "video" && (
-                            <span className="absolute top-2 right-2 flex size-6 items-center justify-center rounded-md bg-ink/70 text-white">
-                              <Play size={12} fill="currentColor" aria-hidden="true" />
-                            </span>
-                          )}
-                          {(n.media?.length ?? 1) > 1 && (
-                            <span className="absolute top-2 right-2 flex h-6 items-center gap-1 rounded-md bg-ink/70 px-1.5 text-[11px] font-bold text-white">
-                              <Layers size={12} aria-hidden="true" />
-                              {n.media!.length}
-                            </span>
-                          )}
+                          <span className="absolute top-2 right-2 flex gap-1">
+                            {n.media?.[0]?.kind === "video" && <SilentFor src={fileSrc(n.media[0].fileId)} size="sm" />}
+                            {n.media?.[0]?.kind === "video" && (n.media?.length ?? 1) === 1 && (
+                              <span className="flex size-6 items-center justify-center rounded-md bg-ink/70 text-white">
+                                <Play size={12} fill="currentColor" aria-hidden="true" />
+                              </span>
+                            )}
+                            {(n.media?.length ?? 1) > 1 && (
+                              <span className="flex h-6 items-center gap-1 rounded-md bg-ink/70 px-1.5 text-[11px] font-bold text-white">
+                                <Layers size={12} aria-hidden="true" />
+                                {n.media!.length}
+                              </span>
+                            )}
+                          </span>
                           {notesOf(boards[current.board], n.id).length > 0 && (
                             <span className="absolute bottom-2 left-2 flex size-6 items-center justify-center rounded-md bg-note-bg text-note-fg" title="Ada catatan">
                               <NotebookPen size={13} aria-hidden="true" />
@@ -976,7 +1022,7 @@ export function MoodboardMobile({ initial, edit, shared }: { initial: Boards; ed
           <div
             data-track
             tabIndex={-1}
-            className="absolute inset-0 flex snap-x snap-mandatory overflow-x-auto overscroll-contain outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="absolute inset-0 flex touch-pan-x snap-x snap-mandatory overflow-x-auto overscroll-contain outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             onScroll={(e) => {
               const el = e.currentTarget;
               swipeFx(el);
@@ -1022,7 +1068,9 @@ export function MoodboardMobile({ initial, edit, shared }: { initial: Boards; ed
             <span className="text-[13px] font-semibold text-white/80">
               {shown + 1} dari {slides.length}
             </span>
-            <span className="size-11" />
+            <span className="flex size-11 items-center justify-center">
+              {slide?.media?.kind === "video" && <SilentFor src={fileSrc(slide.media.fileId)} className="bg-white/15" />}
+            </span>
           </div>
 
           {slide && (

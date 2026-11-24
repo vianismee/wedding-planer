@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { useSilentVideo } from "@/lib/video-audio";
 import type { MoodData, MoodEdge, MoodMedia, MoodNode } from "@/db/schema";
 import { cleanParents, MOOD_FONTS, sourceName, type MoodFont, type MoodRect } from "@/lib/moodboard";
 import { cx } from "@/components/kit";
@@ -378,6 +379,7 @@ function MediaVideo({ src, active }: { src: string; active: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
+  const silent = useSilentVideo(src);
   useEffect(() => {
     if (!active) ref.current?.pause();
   }, [active]);
@@ -409,7 +411,8 @@ function MediaVideo({ src, active }: { src: string; active: boolean }) {
       >
         {playing ? <Pause size={20} aria-hidden="true" /> : <Play size={20} className="ml-0.5" aria-hidden="true" />}
       </button>
-      {playing && (
+      {silent && <SilentMark className="absolute bottom-2 right-2" />}
+      {playing && !silent && (
         <button
           type="button"
           aria-label={muted ? "Nyalakan suara" : "Matikan suara"}
@@ -624,6 +627,28 @@ export function PhotoViewer({
 }
 
 /** Isi kartu media di dialog: geser ke samping untuk foto dan video berikutnya, video dengan kontrol bawaan. */
+/**
+ * Penanda video tanpa trek audio: hanya ikon, tanpa teks. Labelnya tetap ada untuk pembaca layar dan tooltip.
+ * Instagram kadang mengirim video tanpa suara ke server, misalnya musik berlisensi yang tidak tersedia di sana.
+ */
+export function SilentMark({ className, size = "md" }: { className?: string; size?: "sm" | "md" }) {
+  return (
+    <span
+      role="img"
+      aria-label="Video tanpa suara"
+      title="Video tanpa suara"
+      className={cx("pointer-events-none flex items-center justify-center rounded-md bg-ink/75 text-white", size === "sm" ? "size-6" : "size-8 rounded-lg", className)}
+    >
+      <VolumeX size={size === "sm" ? 13 : 15} aria-hidden="true" />
+    </span>
+  );
+}
+
+/** SilentMark yang memeriksa sendiri apakah video `src` punya audio. */
+export function SilentFor({ src, className, size }: { src: string; className?: string; size?: "sm" | "md" }) {
+  return useSilentVideo(src) ? <SilentMark className={className} size={size} /> : null;
+}
+
 function MediaList({ n, src }: { n: MoodNode; src: (fileId: string) => string }) {
   const items: MoodMedia[] = n.media ?? [];
   return (
@@ -631,7 +656,10 @@ function MediaList({ n, src }: { n: MoodNode; src: (fileId: string) => string })
       {items.map((m, j) => (
         <div key={m.fileId} className="flex w-full shrink-0 snap-center items-center justify-center overflow-hidden rounded-2xl bg-ground">
           {m.kind === "video" ? (
-            <video src={src(m.fileId)} controls playsInline preload="metadata" className="block max-h-[68dvh] w-auto max-w-full" />
+            <div className="relative">
+              <video src={src(m.fileId)} controls playsInline preload="metadata" className="block max-h-[68dvh] w-auto max-w-full" />
+              <SilentFor src={src(m.fileId)} className="absolute top-2 right-2" />
+            </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={src(m.fileId)} alt={`${n.title} ${j + 1}`} className="block max-h-[68dvh] w-auto max-w-full object-contain" />
